@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: UNLICENSED
-pragma solidity ^0.8.13;
+pragma solidity 0.8.28;
 
-contract Counter {
-    uint256 public number;
+struct PointSaleRequest {
+    address user;
+    address pTokenIn;
+    address tokenOut;
+    uint256 minPrice;
+}
 
-    function setNumber(uint256 newNumber) public {
-        number = newNumber;
-    }
+contract PointSellingController {
+    mapping(uint256 requestId => PointSaleRequest request) public requests;
 
-    function increment() public {
-        number++;
-    }
+    function executePointSale(uint256 requestId) {}
 }
