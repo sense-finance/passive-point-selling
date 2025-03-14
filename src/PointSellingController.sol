@@ -5,11 +5,16 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
-error Unauthorized();
+/// @dev Provided address for tokens iz zero
 error ZeroAddressProvided();
+
+/// @dev users and claims arrays do not have the same length
 error ArrayLengthMismatch();
+
+/// @dev one of the provided requests is inactive
 error RequestInactive();
-error PointTokenMismatch();
+
+/// @dev one or more requests have different tokenOut
 error TokenOutMismatch();
 
 struct PointSaleRequest {
@@ -34,6 +39,11 @@ abstract contract PointSellingController is Ownable2Step {
 
     uint256 public fee = 1e15;
 
+    /// @dev Adds, updates or deactivates point selling request
+    /// Reverts if provided pToken address is zero address
+    /// Reverts if provided tokenOut is zero address
+    /// @param pToken address of the pToken
+    /// @param request sale request data
     function updateRequest(IERC20 pToken, PointSaleRequest calldata request) external {
         require(address(pToken) != address(0), ZeroAddressProvided());
         require(address(request.tokenOut) != address(0), ZeroAddressProvided());
@@ -45,6 +55,7 @@ abstract contract PointSellingController is Ownable2Step {
     /// Reverts if @param claims and @param users have different length
     /// Reverts if batch requests do not have the same pTokenIn and tokenOut
     /// Reverts if one of the requests is not active
+    /// Assumes that provided pointId from @param claims will match actual @param pToken
     /// @param pToken address of the pToken being sold
     /// @param users addresses of users selling pTokens
     /// @param pointMinter address of the contract to mint points
@@ -86,6 +97,12 @@ abstract contract PointSellingController is Ownable2Step {
         }
     }
 
+    /// @dev Abstract function used to implement swaps from pToken to requested token out
+    /// Derived contract should implement particular strategies for swaps
+    /// @param tokenIn address of the token to be swapped
+    /// @param tokenOut address of the token to be swapped for
+    /// @param amountIn amount of @param tokenIn to be swapped
+    /// @param minReturn minimal amount of @param tokenOut to be received
     function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minReturn)
         internal
         virtual
