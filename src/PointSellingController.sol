@@ -17,6 +17,9 @@ error RequestInactive();
 /// @dev one or more requests have different tokenOut
 error TokenOutMismatch();
 
+/// @dev user is not a rumpel wallet owner
+error NotSafeOwner();
+
 struct PointSaleRequest {
     bool active;
     IERC20 tokenOut;
@@ -33,6 +36,7 @@ struct Claim {
 
 interface IPointMinter {
     function claimPTokens(Claim calldata _claim, address _account, address _receiver) external;
+    function trustReceiver(address _account, bool _isTrusted) external;
 }
 
 interface ISafe {
@@ -43,8 +47,6 @@ abstract contract PointSellingController is Ownable2Step {
     mapping(address user => mapping(IERC20 pToken => PointSaleRequest request)) public requests;
 
     uint256 public fee = 1e15;
-
-    error NotSafeOwner();
 
     constructor(address initialOwner) Ownable(initialOwner) {}
 
