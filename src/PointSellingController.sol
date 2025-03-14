@@ -3,7 +3,7 @@ pragma solidity 0.8.29;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /// @dev Provided address for tokens iz zero
 error ZeroAddressProvided();
@@ -21,6 +21,7 @@ struct PointSaleRequest {
     bool active;
     IERC20 tokenOut;
     uint256 minPrice;
+    address recipient;
 }
 
 struct Claim {
@@ -34,21 +35,34 @@ interface IPointMinter {
     function claimPTokens(Claim calldata _claim, address _account, address _receiver) external;
 }
 
+interface ISafe {
+    function isOwner(address _owner) external view returns (bool);
+}
+
 abstract contract PointSellingController is Ownable2Step {
     mapping(address user => mapping(IERC20 pToken => PointSaleRequest request)) public requests;
 
     uint256 public fee = 1e15;
 
+    error NotSafeOwner();
+
+    constructor(address initialOwner) Ownable(initialOwner) {}
+
     /// @dev Adds, updates or deactivates point selling request
     /// Reverts if provided pToken address is zero address
     /// Reverts if provided tokenOut is zero address
+    /// @param rumpelWallet address of the user's rumpel wallet
     /// @param pToken address of the pToken
     /// @param request sale request data
-    function updateRequest(IERC20 pToken, PointSaleRequest calldata request) external {
+    function updateRequest(address rumpelWallet, IERC20 pToken, PointSaleRequest calldata request) external {
         require(address(pToken) != address(0), ZeroAddressProvided());
         require(address(request.tokenOut) != address(0), ZeroAddressProvided());
 
-        requests[msg.sender][pToken] = request;
+        if (!ISafe(rumpelWallet).isOwner(msg.sender)) {
+            revert NotSafeOwner();
+        }
+
+        requests[rumpelWallet][pToken] = request;
     }
 
     /// @dev Executes batch point sale. Each user needs to register this contract as a trusted reciever.
@@ -57,28 +71,28 @@ abstract contract PointSellingController is Ownable2Step {
     /// Reverts if one of the requests is not active
     /// Assumes that provided pointId from @param claims will match actual @param pToken
     /// @param pToken address of the pToken being sold
-    /// @param users addresses of users selling pTokens
+    /// @param wallets rumpel wallets of users selling pTokens
     /// @param pointMinter address of the contract to mint points
     /// @param claims claims for each user's points
     function executePointSale(
         IERC20 pToken,
-        address[] calldata users,
+        address[] calldata wallets,
         IPointMinter pointMinter,
         Claim[] calldata claims
     ) external onlyOwner {
-        require(users.length == claims.length, ArrayLengthMismatch());
-        IERC20 tokenOut = requests[users[0]][pToken].tokenOut;
+        require(wallets.length == claims.length, ArrayLengthMismatch());
+        IERC20 tokenOut = requests[wallets[0]][pToken].tokenOut;
 
-        PointSaleRequest[] memory requests_ = new PointSaleRequest[](users.length);
+        PointSaleRequest[] memory requests_ = new PointSaleRequest[](wallets.length);
         uint256 totalPoints;
         uint256 minPrice;
 
-        for (uint256 i = 0; i < users.length; i++) {
-            requests_[i] = requests[users[i]][pToken];
+        for (uint256 i = 0; i < wallets.length; i++) {
+            requests_[i] = requests[wallets[i]][pToken];
             require(requests_[i].active, RequestInactive());
             require(tokenOut == requests_[i].tokenOut, TokenOutMismatch());
 
-            pointMinter.claimPTokens(claims[i], users[i], address(this));
+            pointMinter.claimPTokens(claims[i], wallets[i], address(this));
             totalPoints += claims[i].amountToClaim;
 
             // chose the best possible minPrice of the batch
@@ -89,11 +103,11 @@ abstract contract PointSellingController is Ownable2Step {
         uint256 amountOut = swap(pToken, tokenOut, totalPoints, totalPoints * minPrice / tokenOutPrecision);
 
         /// To be discussed if fee should be paid in point token instead
-        uint256 feeAmount = amountOut * fee / 1e18;
-        tokenOut.transfer(msg.sender, feeAmount);
+        tokenOut.transfer(msg.sender, amountOut * fee / 1e18);
 
-        for (uint256 i = 0; i < users.length; i++) {
-            tokenOut.transfer(users[i], amountOut * claims[i].amountToClaim / totalPoints);
+        for (uint256 i = 0; i < wallets.length; i++) {
+            address recipient = requests[wallets[i]][pToken].recipient;
+            tokenOut.transfer(recipient, amountOut * claims[i].amountToClaim / totalPoints);
         }
     }
 
