@@ -3,6 +3,7 @@ pragma solidity 0.8.29;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {Ownable2Step} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 error Unauthorized();
 error ZeroAddressProvided();
@@ -12,9 +13,7 @@ error PointTokenMismatch();
 error TokenOutMismatch();
 
 struct PointSaleRequest {
-    address user;
     bool active;
-    IERC20 pTokenIn;
     IERC20 tokenOut;
     uint256 minPrice;
 }
@@ -30,52 +29,45 @@ interface IPointMinter {
     function claimPTokens(Claim calldata _claim, address _account, address _receiver) external;
 }
 
-abstract contract PointSellingController {
-    uint256 public nextRequestId;
+abstract contract PointSellingController is Ownable2Step {
+    mapping(address user => mapping(IERC20 pToken => PointSaleRequest request)) public requests;
 
-    mapping(uint256 requestId => PointSaleRequest request) public requests;
+    uint256 public fee = 1e15;
 
-    uint256 public fee = 1e16;
-
-    function addRequest(PointSaleRequest calldata request) external returns (uint256 requestId) {
-        require(request.user == msg.sender, Unauthorized());
+    function updateRequest(IERC20 pToken, PointSaleRequest calldata request) external {
+        require(address(pToken) != address(0), ZeroAddressProvided());
         require(address(request.tokenOut) != address(0), ZeroAddressProvided());
-        require(address(request.pTokenIn) != address(0), ZeroAddressProvided());
 
-        requestId = nextRequestId++;
-        requests[requestId] = request;
-    }
-
-    function setRequestActive(uint256 requestId, bool isActive) external {
-        require(requests[requestId].user == msg.sender, Unauthorized());
-        requests[requestId].active = isActive;
+        requests[msg.sender][pToken] = request;
     }
 
     /// @dev Executes batch point sale. Each user needs to register this contract as a trusted reciever.
-    /// Reverts if @param claims and @param requestIds have different length
+    /// Reverts if @param claims and @param users have different length
     /// Reverts if batch requests do not have the same pTokenIn and tokenOut
     /// Reverts if one of the requests is not active
-    /// @param requestIds ids of user requests to be batched
+    /// @param pToken address of the pToken being sold
+    /// @param users addresses of users selling pTokens
     /// @param pointMinter address of the contract to mint points
     /// @param claims claims for each user's points
-    function executePointSale(uint256[] calldata requestIds, IPointMinter pointMinter, Claim[] calldata claims)
-        external
-    {
-        require(requestIds.length == claims.length, ArrayLengthMismatch());
-        IERC20 pToken = requests[requestIds[0]].pTokenIn;
-        IERC20 tokenOut = requests[requestIds[0]].tokenOut;
+    function executePointSale(
+        IERC20 pToken,
+        address[] calldata users,
+        IPointMinter pointMinter,
+        Claim[] calldata claims
+    ) external onlyOwner {
+        require(users.length == claims.length, ArrayLengthMismatch());
+        IERC20 tokenOut = requests[users[0]][pToken].tokenOut;
 
-        PointSaleRequest[] memory requests_ = new PointSaleRequest[](requestIds.length);
+        PointSaleRequest[] memory requests_ = new PointSaleRequest[](users.length);
         uint256 totalPoints;
         uint256 minPrice;
 
-        for (uint256 i = 0; i < requestIds.length; i++) {
-            requests_[i] = requests[requestIds[i]];
+        for (uint256 i = 0; i < users.length; i++) {
+            requests_[i] = requests[users[i]][pToken];
             require(requests_[i].active, RequestInactive());
-            require(pToken == requests_[i].pTokenIn, PointTokenMismatch());
             require(tokenOut == requests_[i].tokenOut, TokenOutMismatch());
 
-            pointMinter.claimPTokens(claims[i], requests_[i].user, address(this));
+            pointMinter.claimPTokens(claims[i], users[i], address(this));
             totalPoints += claims[i].amountToClaim;
 
             // chose the best possible minPrice of the batch
@@ -89,8 +81,8 @@ abstract contract PointSellingController {
         uint256 feeAmount = amountOut * fee / 1e18;
         tokenOut.transfer(msg.sender, feeAmount);
 
-        for (uint256 i = 0; i < requestIds.length; i++) {
-            tokenOut.transfer(requests[i].user, amountOut * claims[i].amountToClaim / totalPoints);
+        for (uint256 i = 0; i < users.length; i++) {
+            tokenOut.transfer(users[i], amountOut * claims[i].amountToClaim / totalPoints);
         }
     }
 
