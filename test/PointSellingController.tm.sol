@@ -108,6 +108,8 @@ contract PointSellingControllerMainnetTest is Test {
         claims[0] = Claim({pointsId: pointsId, totalClaimable: 28267069140624997000, amountToClaim: 1, proof: proof});
 
         vm.prank(admin);
-        pointSellingController.executePointSale(IERC20(address(kpEF5)), wallets, pointMinter, claims);
+        pointSellingController.executePointSale(
+            IERC20(address(kpEF5)), wallets, pointMinter, claims, 1000000000000000000
+        );
     }
 }

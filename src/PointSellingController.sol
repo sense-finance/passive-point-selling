@@ -2,7 +2,6 @@
 pragma solidity 0.8.29;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /// @dev Provided address for tokens iz zero
@@ -16,6 +15,9 @@ error RequestInactive();
 
 /// @dev one or more requests have different tokenOut
 error TokenOutMismatch();
+
+/// @dev min price for pToken sale is lower than one or more user provided values
+error MinPriceTooLow();
 
 /// @dev user is not a rumpel wallet owner
 error NotSafeOwner();
@@ -60,7 +62,7 @@ abstract contract PointSellingController is Ownable2Step {
         require(address(pToken) != address(0), ZeroAddressProvided());
         require(address(request.tokenOut) != address(0), ZeroAddressProvided());
 
-        if (!ISafe(rumpelWallet).isOwner(msg.sender)) {
+        if (rumpelWallet != msg.sender && !ISafe(rumpelWallet).isOwner(msg.sender)) {
             revert NotSafeOwner();
         }
 
@@ -76,40 +78,40 @@ abstract contract PointSellingController is Ownable2Step {
     /// @param wallets rumpel wallets of users selling pTokens
     /// @param pointMinter address of the contract to mint points
     /// @param claims claims for each user's points
+    /// @param minPrice minimum price for selling pTokens
     function executePointSale(
         IERC20 pToken,
         address[] calldata wallets,
         IPointMinter pointMinter,
-        Claim[] calldata claims
+        Claim[] calldata claims,
+        uint256 minPrice
     ) external onlyOwner {
         require(wallets.length == claims.length, ArrayLengthMismatch());
         IERC20 tokenOut = requests[wallets[0]][pToken].tokenOut;
 
         PointSaleRequest[] memory requests_ = new PointSaleRequest[](wallets.length);
         uint256 totalPoints;
-        uint256 minPrice;
 
         for (uint256 i = 0; i < wallets.length; i++) {
             requests_[i] = requests[wallets[i]][pToken];
             require(requests_[i].active, RequestInactive());
             require(tokenOut == requests_[i].tokenOut, TokenOutMismatch());
+            require(minPrice >= requests_[i].minPrice, MinPriceTooLow());
 
             pointMinter.claimPTokens(claims[i], wallets[i], address(this));
             totalPoints += claims[i].amountToClaim;
-
-            // chose the best possible minPrice of the batch
-            minPrice = requests_[i].minPrice > minPrice ? requests_[i].minPrice : minPrice;
         }
 
-        uint256 tokenOutPrecision = 10 ** IERC20Metadata(address(tokenOut)).decimals();
-        uint256 amountOut = swap(pToken, tokenOut, totalPoints, totalPoints * minPrice / tokenOutPrecision);
+        uint256 amountOut = swap(pToken, tokenOut, totalPoints, minPrice);
 
         /// To be discussed if fee should be paid in point token instead
         tokenOut.transfer(msg.sender, amountOut * fee / 1e18);
 
         for (uint256 i = 0; i < wallets.length; i++) {
-            address recipient = requests[wallets[i]][pToken].recipient;
-            tokenOut.transfer(recipient, amountOut * claims[i].amountToClaim / totalPoints);
+            tokenOut.transfer(
+                requests[wallets[i]][pToken].recipient,
+                (amountOut * (1e18 - fee) / 1e18) * claims[i].amountToClaim / totalPoints
+            );
         }
     }
 
@@ -118,8 +120,8 @@ abstract contract PointSellingController is Ownable2Step {
     /// @param tokenIn address of the token to be swapped
     /// @param tokenOut address of the token to be swapped for
     /// @param amountIn amount of @param tokenIn to be swapped
-    /// @param minReturn minimal amount of @param tokenOut to be received
-    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minReturn)
+    /// @param minPrice minimal price in @param tokenOut precision for the swap
+    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minPrice)
         internal
         virtual
         returns (uint256 amountOut);
