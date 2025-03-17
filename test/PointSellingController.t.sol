@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 import {
     PointSellingController,
@@ -17,7 +18,8 @@ import {
     ArrayLengthMismatch,
     RequestInactive,
     TokenOutMismatch,
-    MinPriceTooLow
+    MinPriceTooLow,
+    FeeTooLarge
 } from "../src/PointSellingController.sol";
 
 contract ERC20Mock is ERC20 {
@@ -110,6 +112,28 @@ contract PointSellingControllerTest is Test {
 
         tokenOut.mint(address(pointSellingController.amm()), 1e27);
         ERC20Mock(address(pToken)).mint(address(pointSellingController.amm()), 1e27);
+    }
+
+    function test_accessControl() public {
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, user));
+        pointSellingController.setFeePercentage(1);
+
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, user));
+        pointSellingController.executePointSale(pToken, new address[](1), minter, new Claim[](1), 1);
+    }
+
+    function test_setFeePercentage(uint256 newFee) public {
+        newFee %= 2e17;
+        vm.prank(admin);
+        if (newFee > 1e17) {
+            vm.expectRevert(FeeTooLarge.selector);
+            pointSellingController.setFeePercentage(newFee);
+        } else {
+            pointSellingController.setFeePercentage(newFee);
+            assertEq(pointSellingController.fee(), newFee);
+        }
     }
 
     function test_addRequest() public {
