@@ -31,7 +31,7 @@ error Slippage();
 
 contract UniversalPoolMock {
     uint256 public nextSwapRate = 1e18;
-    
+
     function setNextSwapRate(uint256 rate) external {
         nextSwapRate = rate;
     }
@@ -42,8 +42,8 @@ contract UniversalPoolMock {
     {
         uint256 tokenOutPrecision = 10 ** IERC20Metadata(address(tokenOut)).decimals();
         amountOut = amountIn * nextSwapRate / tokenOutPrecision;
-        require (amountOut >= minReturn, Slippage());
-        
+        require(amountOut >= minReturn, Slippage());
+
         tokenIn.transferFrom(msg.sender, address(this), amountIn);
         tokenOut.transfer(msg.sender, amountOut);
     }
@@ -61,10 +61,7 @@ contract PointSellingControllerMock is PointSellingController {
     {
         tokenIn.approve(address(amm), amountIn);
         return amm.swap(
-            tokenIn,
-            tokenOut,
-            amountIn,
-            minPrice * amountIn / (10 ** IERC20Metadata(address(tokenOut)).decimals())
+            tokenIn, tokenOut, amountIn, minPrice * amountIn / (10 ** IERC20Metadata(address(tokenOut)).decimals())
         );
     }
 }
@@ -120,7 +117,12 @@ contract PointSellingControllerTest is Test {
         pointSellingController.updateRequest(
             user,
             IERC20(address(0)),
-            PointSaleRequest({active: true, tokenOut: IERC20(address(1)), minPrice: 1000000000000000000, recipient: user})
+            PointSaleRequest({
+                active: true,
+                tokenOut: IERC20(address(1)),
+                minPrice: 1000000000000000000,
+                recipient: user
+            })
         );
 
         vm.prank(user);
@@ -128,7 +130,12 @@ contract PointSellingControllerTest is Test {
         pointSellingController.updateRequest(
             user,
             IERC20(address(1)),
-            PointSaleRequest({active: true, tokenOut: IERC20(address(0)), minPrice: 1000000000000000000, recipient: user})
+            PointSaleRequest({
+                active: true,
+                tokenOut: IERC20(address(0)),
+                minPrice: 1000000000000000000,
+                recipient: user
+            })
         );
 
         address rumpelWallet = address(new RumpelWalletMock(makeAddr("random owner")));
@@ -137,19 +144,28 @@ contract PointSellingControllerTest is Test {
         pointSellingController.updateRequest(
             rumpelWallet,
             IERC20(address(1)),
-            PointSaleRequest({active: true, tokenOut: IERC20(address(2)), minPrice: 1000000000000000000, recipient: user})
+            PointSaleRequest({
+                active: true,
+                tokenOut: IERC20(address(2)),
+                minPrice: 1000000000000000000,
+                recipient: user
+            })
         );
 
         vm.prank(user);
         pointSellingController.updateRequest(
             user,
             IERC20(address(1)),
-            PointSaleRequest({active: true, tokenOut: IERC20(address(2)), minPrice: 1000000000000000000, recipient: user})
+            PointSaleRequest({
+                active: true,
+                tokenOut: IERC20(address(2)),
+                minPrice: 1000000000000000000,
+                recipient: user
+            })
         );
 
-        (bool active, IERC20 _tokenOut, uint256 minPrice, address recipient) = pointSellingController.requests(
-            user, IERC20(address(1))
-        );
+        (bool active, IERC20 _tokenOut, uint256 minPrice, address recipient) =
+            pointSellingController.requests(user, IERC20(address(1)));
         assertTrue(active);
         assertEq(minPrice, 1000000000000000000);
         assertEq(recipient, user);
@@ -170,7 +186,6 @@ contract PointSellingControllerTest is Test {
         vm.expectRevert(RequestInactive.selector);
         pointSellingController.executePointSale(pToken, wallets, minter, claims);
 
-
         vm.prank(user);
         pointSellingController.updateRequest(
             user,
@@ -182,18 +197,19 @@ contract PointSellingControllerTest is Test {
         pointSellingController.updateRequest(
             user1,
             pToken,
-            PointSaleRequest({active: true, tokenOut: IERC20(address(1234546)), minPrice: 1000000000000000000, recipient: user1})
+            PointSaleRequest({
+                active: true,
+                tokenOut: IERC20(address(1234546)),
+                minPrice: 1000000000000000000,
+                recipient: user1
+            })
         );
         wallets = new address[](2);
         claims = new Claim[](2);
         wallets[0] = user;
         wallets[1] = user1;
-        claims[0] = Claim({
-            pointsId: bytes32(uint256(1)),
-            totalClaimable: 1e18,
-            amountToClaim: 1e18,
-            proof: new bytes32[](0)
-        });
+        claims[0] =
+            Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
         vm.prank(admin);
         vm.expectRevert(TokenOutMismatch.selector);
         pointSellingController.executePointSale(pToken, wallets, minter, claims);
@@ -204,12 +220,8 @@ contract PointSellingControllerTest is Test {
             pToken,
             PointSaleRequest({active: true, tokenOut: tokenOut, minPrice: 1000000000000000000, recipient: user1})
         );
-        claims[1] = Claim({
-            pointsId: bytes32(uint256(1)),
-            totalClaimable: 1e18,
-            amountToClaim: 1e18,
-            proof: new bytes32[](0)
-        });
+        claims[1] =
+            Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
 
         vm.prank(admin);
         pointSellingController.executePointSale(pToken, wallets, minter, claims);
