@@ -22,6 +22,9 @@ error MinPriceTooLow();
 /// @dev user is not a rumpel wallet owner
 error NotSafeOwner();
 
+/// @dev provided fee percentage too large
+error FeeTooLarge();
+
 struct PointSaleRequest {
     bool active;
     IERC20 tokenOut;
@@ -46,11 +49,21 @@ interface ISafe {
 }
 
 abstract contract PointSellingController is Ownable2Step {
+    uint256 MAX_FEE = 1e17; // 10%
+    uint256 FEE_PRECISION = 1e18;
+
     mapping(address user => mapping(IERC20 pToken => PointSaleRequest request)) public requests;
 
     uint256 public fee = 1e15;
 
     constructor(address initialOwner) Ownable(initialOwner) {}
+
+    /// @dev sets fee percentage. Reverts if fee is bigger than `MAX_FEE`
+    /// @param newFee new fee percentage
+    function setFeePercentage(uint256 newFee) external onlyOwner {
+        require(newFee <= MAX_FEE, FeeTooLarge());
+        fee = newFee;
+    }
 
     /// @dev Adds, updates or deactivates point selling request
     /// Reverts if provided pToken address is zero address
@@ -105,12 +118,14 @@ abstract contract PointSellingController is Ownable2Step {
         uint256 amountOut = swap(pToken, tokenOut, totalPoints, minPrice);
 
         /// To be discussed if fee should be paid in point token instead
-        tokenOut.transfer(msg.sender, amountOut * fee / 1e18);
+        if (fee > 0) {
+            tokenOut.transfer(msg.sender, amountOut * fee / FEE_PRECISION);
+        }
 
         for (uint256 i = 0; i < wallets.length; i++) {
             tokenOut.transfer(
                 requests[wallets[i]][pToken].recipient,
-                (amountOut * (1e18 - fee) / 1e18) * claims[i].amountToClaim / totalPoints
+                (amountOut * (FEE_PRECISION - fee) / FEE_PRECISION) * claims[i].amountToClaim / totalPoints
             );
         }
     }

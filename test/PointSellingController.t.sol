@@ -17,7 +17,8 @@ import {
     ArrayLengthMismatch,
     RequestInactive,
     TokenOutMismatch,
-    MinPriceTooLow
+    MinPriceTooLow,
+    FeeTooLarge
 } from "../src/PointSellingController.sol";
 
 contract ERC20Mock is ERC20 {
@@ -110,6 +111,18 @@ contract PointSellingControllerTest is Test {
 
         tokenOut.mint(address(pointSellingController.amm()), 1e27);
         ERC20Mock(address(pToken)).mint(address(pointSellingController.amm()), 1e27);
+    }
+
+    function test_setFeePercentage(uint256 newFee) public {
+        newFee %= 2e17;
+        vm.prank(admin);
+        if (newFee > 1e17) {
+            vm.expectRevert(FeeTooLarge.selector);
+            pointSellingController.setFeePercentage(newFee);
+        } else {
+            pointSellingController.setFeePercentage(newFee);
+            assertEq(pointSellingController.fee(), newFee);
+        }
     }
 
     function test_addRequest() public {
