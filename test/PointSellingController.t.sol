@@ -16,7 +16,8 @@ import {
     ISafe,
     ArrayLengthMismatch,
     RequestInactive,
-    TokenOutMismatch
+    TokenOutMismatch,
+    MinPriceTooLow
 } from "../src/PointSellingController.sol";
 
 contract ERC20Mock is ERC20 {
@@ -177,14 +178,14 @@ contract PointSellingControllerTest is Test {
         Claim[] memory claims = new Claim[](1);
         vm.prank(admin);
         vm.expectRevert(ArrayLengthMismatch.selector);
-        pointSellingController.executePointSale(pToken, wallets, minter, claims);
+        pointSellingController.executePointSale(pToken, wallets, minter, claims, 1000000000000000000);
 
         wallets = new address[](1);
         claims = new Claim[](1);
         wallets[0] = makeAddr("random user");
         vm.prank(admin);
         vm.expectRevert(RequestInactive.selector);
-        pointSellingController.executePointSale(pToken, wallets, minter, claims);
+        pointSellingController.executePointSale(pToken, wallets, minter, claims, 1000000000000000000);
 
         vm.prank(user);
         pointSellingController.updateRequest(
@@ -192,6 +193,13 @@ contract PointSellingControllerTest is Test {
             pToken,
             PointSaleRequest({active: true, tokenOut: tokenOut, minPrice: 1000000000000000000, recipient: user})
         );
+
+        wallets = new address[](1);
+        claims = new Claim[](1);
+        wallets[0] = user;
+        vm.prank(admin);
+        vm.expectRevert(MinPriceTooLow.selector);
+        pointSellingController.executePointSale(pToken, wallets, minter, claims, 1e17);
 
         vm.prank(user1);
         pointSellingController.updateRequest(
@@ -212,7 +220,7 @@ contract PointSellingControllerTest is Test {
             Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
         vm.prank(admin);
         vm.expectRevert(TokenOutMismatch.selector);
-        pointSellingController.executePointSale(pToken, wallets, minter, claims);
+        pointSellingController.executePointSale(pToken, wallets, minter, claims, 1000000000000000000);
 
         vm.prank(user1);
         pointSellingController.updateRequest(
@@ -224,7 +232,7 @@ contract PointSellingControllerTest is Test {
             Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
 
         vm.prank(admin);
-        pointSellingController.executePointSale(pToken, wallets, minter, claims);
+        pointSellingController.executePointSale(pToken, wallets, minter, claims, 1000000000000000000);
 
         assertEq(tokenOut.balanceOf(user), tokenOut.balanceOf(user1));
         assertEq(tokenOut.balanceOf(user), 999000000000000000);
