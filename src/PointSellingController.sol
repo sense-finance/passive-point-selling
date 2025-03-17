@@ -16,6 +16,9 @@ error RequestInactive();
 /// @dev one or more requests have different tokenOut
 error TokenOutMismatch();
 
+/// @dev min price for pToken sale is lower than one or more user provided values
+error MinPriceTooLow();
+
 /// @dev user is not a rumpel wallet owner
 error NotSafeOwner();
 
@@ -75,29 +78,28 @@ abstract contract PointSellingController is Ownable2Step {
     /// @param wallets rumpel wallets of users selling pTokens
     /// @param pointMinter address of the contract to mint points
     /// @param claims claims for each user's points
+    /// @param minPrice minimum price for selling pTokens
     function executePointSale(
         IERC20 pToken,
         address[] calldata wallets,
         IPointMinter pointMinter,
-        Claim[] calldata claims
+        Claim[] calldata claims,
+        uint256 minPrice
     ) external onlyOwner {
         require(wallets.length == claims.length, ArrayLengthMismatch());
         IERC20 tokenOut = requests[wallets[0]][pToken].tokenOut;
 
         PointSaleRequest[] memory requests_ = new PointSaleRequest[](wallets.length);
         uint256 totalPoints;
-        uint256 minPrice;
 
         for (uint256 i = 0; i < wallets.length; i++) {
             requests_[i] = requests[wallets[i]][pToken];
             require(requests_[i].active, RequestInactive());
             require(tokenOut == requests_[i].tokenOut, TokenOutMismatch());
+            require(minPrice >= requests_[i].minPrice, MinPriceTooLow());
 
             pointMinter.claimPTokens(claims[i], wallets[i], address(this));
             totalPoints += claims[i].amountToClaim;
-
-            // chose the best possible minPrice of the batch
-            minPrice = requests_[i].minPrice > minPrice ? requests_[i].minPrice : minPrice;
         }
 
         uint256 amountOut = swap(pToken, tokenOut, totalPoints, minPrice);
