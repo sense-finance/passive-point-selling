@@ -15,7 +15,7 @@ import {
 contract PointSellingControllerInstance is PointSellingController {
     constructor(address _owner) PointSellingController(_owner) {}
 
-    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minReturn)
+    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minReturn, bytes calldata additionalParams)
         internal
         override
         returns (uint256 amountOut)
@@ -109,7 +109,7 @@ contract PointSellingControllerMainnetTest is Test {
 
         vm.prank(admin);
         pointSellingController.executePointSale(
-            IERC20(address(kpEF5)), wallets, pointMinter, claims, 1000000000000000000
+            IERC20(address(kpEF5)), wallets, pointMinter, claims, 1000000000000000000, ""
         );
     }
 }
