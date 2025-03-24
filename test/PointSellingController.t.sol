@@ -57,7 +57,7 @@ contract PointSellingControllerMock is PointSellingController {
 
     constructor(address _owner) PointSellingController(_owner) {}
 
-    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minPrice)
+    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minPrice, bytes calldata)
         internal
         override
         returns (uint256 amountOut)
@@ -121,7 +121,7 @@ contract PointSellingControllerTest is Test {
 
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, user));
-        pointSellingController.executePointSale(pToken, new address[](1), minter, new Claim[](1), 1);
+        pointSellingController.executePointSale(pToken, new address[](1), minter, new Claim[](1), 1, "");
     }
 
     function test_setFeePercentage(uint256 newFee) public {
@@ -202,14 +202,14 @@ contract PointSellingControllerTest is Test {
         Claim[] memory claims = new Claim[](1);
         vm.prank(admin);
         vm.expectRevert(ArrayLengthMismatch.selector);
-        pointSellingController.executePointSale(pToken, wallets, minter, claims, 1000000000000000000);
+        pointSellingController.executePointSale(pToken, wallets, minter, claims, 1000000000000000000, "");
 
         wallets = new address[](1);
         claims = new Claim[](1);
         wallets[0] = makeAddr("random user");
         vm.prank(admin);
         vm.expectRevert(RequestInactive.selector);
-        pointSellingController.executePointSale(pToken, wallets, minter, claims, 1000000000000000000);
+        pointSellingController.executePointSale(pToken, wallets, minter, claims, 1000000000000000000, "");
 
         vm.prank(user);
         pointSellingController.updateRequest(
@@ -223,7 +223,7 @@ contract PointSellingControllerTest is Test {
         wallets[0] = user;
         vm.prank(admin);
         vm.expectRevert(MinPriceTooLow.selector);
-        pointSellingController.executePointSale(pToken, wallets, minter, claims, 1e17);
+        pointSellingController.executePointSale(pToken, wallets, minter, claims, 1e17, "");
 
         vm.prank(user1);
         pointSellingController.updateRequest(
@@ -244,7 +244,7 @@ contract PointSellingControllerTest is Test {
             Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
         vm.prank(admin);
         vm.expectRevert(TokenOutMismatch.selector);
-        pointSellingController.executePointSale(pToken, wallets, minter, claims, 1000000000000000000);
+        pointSellingController.executePointSale(pToken, wallets, minter, claims, 1000000000000000000, "");
 
         vm.prank(user1);
         pointSellingController.updateRequest(
@@ -256,7 +256,7 @@ contract PointSellingControllerTest is Test {
             Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
 
         vm.prank(admin);
-        pointSellingController.executePointSale(pToken, wallets, minter, claims, 1000000000000000000);
+        pointSellingController.executePointSale(pToken, wallets, minter, claims, 1000000000000000000, "");
 
         assertEq(tokenOut.balanceOf(user), tokenOut.balanceOf(user1));
         assertEq(tokenOut.balanceOf(user), 999000000000000000);

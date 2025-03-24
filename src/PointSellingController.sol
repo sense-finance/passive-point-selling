@@ -92,12 +92,14 @@ abstract contract PointSellingController is Ownable2Step {
     /// @param pointMinter address of the contract to mint points
     /// @param claims claims for each user's points
     /// @param minPrice minimum price for selling pTokens
+    /// @param additionalParams additional swap params, specific to concrete implementation
     function executePointSale(
         IERC20 pToken,
         address[] calldata wallets,
         IPointMinter pointMinter,
         Claim[] calldata claims,
-        uint256 minPrice
+        uint256 minPrice,
+        bytes calldata additionalParams
     ) external onlyOwner {
         require(wallets.length == claims.length, ArrayLengthMismatch());
         IERC20 tokenOut = requests[wallets[0]][pToken].tokenOut;
@@ -115,7 +117,7 @@ abstract contract PointSellingController is Ownable2Step {
             totalPoints += claims[i].amountToClaim;
         }
 
-        uint256 amountOut = swap(pToken, tokenOut, totalPoints, minPrice);
+        uint256 amountOut = swap(pToken, tokenOut, totalPoints, minPrice, additionalParams);
 
         /// To be discussed if fee should be paid in point token instead
         if (fee > 0) {
@@ -136,7 +138,8 @@ abstract contract PointSellingController is Ownable2Step {
     /// @param tokenOut address of the token to be swapped for
     /// @param amountIn amount of @param tokenIn to be swapped
     /// @param minPrice minimal price in @param tokenOut precision for the swap
-    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minPrice)
+    /// @param additionalParams additional swap params, specific to concrete implementation
+    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minPrice, bytes calldata additionalParams)
         internal
         virtual
         returns (uint256 amountOut);
