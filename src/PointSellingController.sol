@@ -2,6 +2,7 @@
 pragma solidity 0.8.29;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {console} from "forge-std/console.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /// @dev Provided address for tokens iz zero
@@ -39,14 +40,18 @@ struct Claim {
     bytes32[] proof;
 }
 
-interface IPointMinter {
+interface IPointTokenizationVault {
     function claimPTokens(Claim calldata _claim, address _account, address _receiver) external;
     function trustReceiver(address _account, bool _isTrusted) external;
+    function claimedPTokens(address _account, bytes32 _pointsId) external view returns (uint256);
 }
 
 interface ISafe {
     function isOwner(address _owner) external view returns (bool);
 }
+
+// NOTES
+// - should we use uni v4
 
 abstract contract PointSellingController is Ownable2Step {
     uint256 MAX_FEE = 1e17; // 10%
@@ -89,14 +94,14 @@ abstract contract PointSellingController is Ownable2Step {
     /// Assumes that provided pointId from @param claims will match actual @param pToken
     /// @param pToken address of the pToken being sold
     /// @param wallets rumpel wallets of users selling pTokens
-    /// @param pointMinter address of the contract to mint points
+    /// @param pointTokenizationVault address of the contract to mint points
     /// @param claims claims for each user's points
     /// @param minPrice minimum price for selling pTokens
     /// @param additionalParams additional swap params, specific to concrete implementation
     function executePointSale(
         IERC20 pToken,
         address[] calldata wallets,
-        IPointMinter pointMinter,
+        IPointTokenizationVault pointTokenizationVault,
         Claim[] calldata claims,
         uint256 minPrice,
         bytes calldata additionalParams
@@ -113,7 +118,7 @@ abstract contract PointSellingController is Ownable2Step {
             require(tokenOut == requests_[i].tokenOut, TokenOutMismatch());
             require(minPrice >= requests_[i].minPrice, MinPriceTooLow());
 
-            pointMinter.claimPTokens(claims[i], wallets[i], address(this));
+            pointTokenizationVault.claimPTokens(claims[i], wallets[i], address(this));
             totalPoints += claims[i].amountToClaim;
         }
 
