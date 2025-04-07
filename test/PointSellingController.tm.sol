@@ -8,7 +8,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {
     PointSellingController,
     IPointTokenizationVault,
-    PointSaleRequest,
+    UserPreferences,
     NotSafeOwner,
     Claim
 } from "../src/PointSellingController.sol";
@@ -51,40 +51,40 @@ contract PointSellingControllerMainnetTest is Test {
         uniswapV3PointSellingController = new UniswapV3PointSellingController(admin);
     }
 
-    function test_addRequest() public {
+    function test_setUserPreferences() public {
         // Address passed in is not a safe
         vm.prank(rumpelUserSam);
         vm.expectRevert();
-        pointSellingController.updateRequest(
+        pointSellingController.setUserPreferences(
             makeAddr("random wallet"),
             IERC20(address(kpEF5)),
-            PointSaleRequest({active: true, tokenOut: USDC, minPrice: 1000000000000000000, recipient: rumpelUserSam})
+            UserPreferences({minPrice: 1000000000000000000, recipient: rumpelUserSam})
         );
 
         // Address passed in is a safe but Rumpel user is not an owner
         vm.prank(rumpelUserSam);
         vm.expectRevert(NotSafeOwner.selector);
-        pointSellingController.updateRequest(
+        pointSellingController.setUserPreferences(
             randomRumpelWallet,
             IERC20(address(kpEF5)),
-            PointSaleRequest({active: true, tokenOut: USDC, minPrice: 1000000000000000000, recipient: rumpelUserSam})
+            UserPreferences({minPrice: 1000000000000000000, recipient: rumpelUserSam})
         );
 
         // Rumpel user is owner of the rumpel wallet
         vm.prank(rumpelUserSam);
-        pointSellingController.updateRequest(
+        pointSellingController.setUserPreferences(
             samRumpelWallet,
             IERC20(address(kpEF5)),
-            PointSaleRequest({active: true, tokenOut: USDC, minPrice: 1000000000000000000, recipient: rumpelUserSam})
+            UserPreferences({minPrice: 1000000000000000000, recipient: rumpelUserSam})
         );
     }
 
     function test_simpleExecutePointSale() public {
         vm.prank(rumpelUserSam);
-        pointSellingController.updateRequest(
+        pointSellingController.setUserPreferences(
             samRumpelWallet,
             IERC20(address(kpEF5)),
-            PointSaleRequest({active: true, tokenOut: USDC, minPrice: 1000000000000000000, recipient: rumpelUserSam})
+            UserPreferences({minPrice: 1000000000000000000, recipient: rumpelUserSam})
         );
 
         // sam (via rumpel wallet) trust point selling controller
@@ -122,18 +122,18 @@ contract PointSellingControllerMainnetTest is Test {
 
         vm.prank(admin);
         pointSellingController.executePointSale(
-            IERC20(address(kpEF5)), wallets, pointTokenizationVault, claims, 1000000000000000000, ""
+            IERC20(address(kpEF5)), USDC, wallets, pointTokenizationVault, claims, 1000000000000000000, ""
         );
     }
 
     function test_executePointSale_UniswapV3() public {
-        // --- Setup Request ---
+        // --- Setup Preferences ---
         uint256 minPricePerPToken = 0; // Example: min 0 USDC per pToken means we accept any price
         vm.prank(rumpelUserSam);
-        uniswapV3PointSellingController.updateRequest(
+        uniswapV3PointSellingController.setUserPreferences(
             samRumpelWallet,
             IERC20(address(kpEF5)),
-            PointSaleRequest({active: true, tokenOut: USDC, minPrice: minPricePerPToken, recipient: rumpelUserSam})
+            UserPreferences({minPrice: minPricePerPToken, recipient: rumpelUserSam})
         );
 
         // --- Trust Controller ---
@@ -182,13 +182,13 @@ contract PointSellingControllerMainnetTest is Test {
         uint256 usdcBalanceBeforeAdmin = USDC.balanceOf(admin);
         uint256 contractPTokensBefore = IERC20(address(kpEF5)).balanceOf(address(uniswapV3PointSellingController));
 
-        // The minPrice for executePointSale should aggregate the minimums from requests.
+        // The minPrice for executePointSale should aggregate the minimums from preferences.
         // Here, we use the single user's minPrice. If multiple users, it should be the minimum of all their required prices *per pToken*.
         uint256 executeMinPrice = minPricePerPToken;
 
         vm.prank(admin);
         uniswapV3PointSellingController.executePointSale(
-            IERC20(address(kpEF5)), wallets, pointTokenizationVault, claims, executeMinPrice, additionalParams
+            IERC20(address(kpEF5)), USDC, wallets, pointTokenizationVault, claims, executeMinPrice, additionalParams
         );
 
         // --- Assertions ---

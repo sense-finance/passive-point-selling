@@ -10,14 +10,12 @@ import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step
 import {
     PointSellingController,
     IPointTokenizationVault,
-    PointSaleRequest,
+    UserPreferences,
     ZeroAddressProvided,
     NotSafeOwner,
     Claim,
     ISafe,
     ArrayLengthMismatch,
-    RequestInactive,
-    TokenOutMismatch,
     MinPriceTooLow,
     FeeTooLarge
 } from "../src/PointSellingController.sol";
@@ -83,6 +81,13 @@ contract PointTokenizationVaultMock is IPointTokenizationVault {
     function trustReceiver(address _account, bool _isTrusted) external {}
 
     function claimedPTokens(address _account, bytes32 _pointsId) external view returns (uint256) {}
+
+    function multicall(bytes[] calldata calls) external {
+        for (uint256 i = 0; i < calls.length; i++) {
+            (bool success,) = address(this).call(calls[i]);
+            require(success, "Multicall failed");
+        }
+    }
 }
 
 contract RumpelWalletMock is ISafe {
@@ -94,6 +99,12 @@ contract RumpelWalletMock is ISafe {
 
     function isOwner(address _owner) external view returns (bool) {
         return owner == _owner;
+    }
+
+    function getOwners() external view returns (address[] memory) {
+        address[] memory owners = new address[](1);
+        owners[0] = owner;
+        return owners;
     }
 }
 
@@ -123,7 +134,9 @@ contract PointSellingControllerTest is Test {
 
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, user));
-        pointSellingController.executePointSale(pToken, new address[](1), pointTokenizationVault, new Claim[](1), 1, "");
+        pointSellingController.executePointSale(
+            pToken, tokenOut, new address[](1), pointTokenizationVault, new Claim[](1), 1, ""
+        );
     }
 
     function test_setFeePercentage(uint256 newFee) public {
@@ -138,65 +151,28 @@ contract PointSellingControllerTest is Test {
         }
     }
 
-    function test_addRequest() public {
+    function test_setUserPreferences() public {
         vm.prank(user);
         vm.expectRevert(ZeroAddressProvided.selector);
-        pointSellingController.updateRequest(
-            user,
-            IERC20(address(0)),
-            PointSaleRequest({
-                active: true,
-                tokenOut: IERC20(address(1)),
-                minPrice: 1000000000000000000,
-                recipient: user
-            })
-        );
-
-        vm.prank(user);
-        vm.expectRevert(ZeroAddressProvided.selector);
-        pointSellingController.updateRequest(
-            user,
-            IERC20(address(1)),
-            PointSaleRequest({
-                active: true,
-                tokenOut: IERC20(address(0)),
-                minPrice: 1000000000000000000,
-                recipient: user
-            })
+        pointSellingController.setUserPreferences(
+            user, IERC20(address(0)), UserPreferences({minPrice: 1000000000000000000, recipient: user})
         );
 
         address rumpelWallet = address(new RumpelWalletMock(makeAddr("random owner")));
         vm.prank(user);
         vm.expectRevert(NotSafeOwner.selector);
-        pointSellingController.updateRequest(
-            rumpelWallet,
-            IERC20(address(1)),
-            PointSaleRequest({
-                active: true,
-                tokenOut: IERC20(address(2)),
-                minPrice: 1000000000000000000,
-                recipient: user
-            })
+        pointSellingController.setUserPreferences(
+            rumpelWallet, IERC20(address(1)), UserPreferences({minPrice: 1000000000000000000, recipient: user})
         );
 
         vm.prank(user);
-        pointSellingController.updateRequest(
-            user,
-            IERC20(address(1)),
-            PointSaleRequest({
-                active: true,
-                tokenOut: IERC20(address(2)),
-                minPrice: 1000000000000000000,
-                recipient: user
-            })
+        pointSellingController.setUserPreferences(
+            user, IERC20(address(1)), UserPreferences({minPrice: 1000000000000000000, recipient: user})
         );
 
-        (bool active, IERC20 _tokenOut, uint256 minPrice, address recipient) =
-            pointSellingController.requests(user, IERC20(address(1)));
-        assertTrue(active);
+        (uint256 minPrice, address recipient) = pointSellingController.userPreferences(user, IERC20(address(1)));
         assertEq(minPrice, 1000000000000000000);
         assertEq(recipient, user);
-        assertEq(address(_tokenOut), address(2));
     }
 
     function test_executePointSale() public {
@@ -205,43 +181,14 @@ contract PointSellingControllerTest is Test {
         vm.prank(admin);
         vm.expectRevert(ArrayLengthMismatch.selector);
         pointSellingController.executePointSale(
-            pToken, wallets, pointTokenizationVault, claims, 1000000000000000000, ""
-        );
-
-        wallets = new address[](1);
-        claims = new Claim[](1);
-        wallets[0] = makeAddr("random user");
-        vm.prank(admin);
-        vm.expectRevert(RequestInactive.selector);
-        pointSellingController.executePointSale(
-            pToken, wallets, pointTokenizationVault, claims, 1000000000000000000, ""
+            pToken, tokenOut, wallets, pointTokenizationVault, claims, 1000000000000000000, ""
         );
 
         vm.prank(user);
-        pointSellingController.updateRequest(
-            user,
-            pToken,
-            PointSaleRequest({active: true, tokenOut: tokenOut, minPrice: 1000000000000000000, recipient: user})
+        pointSellingController.setUserPreferences(
+            user, pToken, UserPreferences({minPrice: 1000000000000000000, recipient: user})
         );
 
-        wallets = new address[](1);
-        claims = new Claim[](1);
-        wallets[0] = user;
-        vm.prank(admin);
-        vm.expectRevert(MinPriceTooLow.selector);
-        pointSellingController.executePointSale(pToken, wallets, pointTokenizationVault, claims, 1e17, "");
-
-        vm.prank(user1);
-        pointSellingController.updateRequest(
-            user1,
-            pToken,
-            PointSaleRequest({
-                active: true,
-                tokenOut: IERC20(address(1234546)),
-                minPrice: 1000000000000000000,
-                recipient: user1
-            })
-        );
         wallets = new address[](2);
         claims = new Claim[](2);
         wallets[0] = user;
@@ -249,23 +196,19 @@ contract PointSellingControllerTest is Test {
         claims[0] =
             Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
         vm.prank(admin);
-        vm.expectRevert(TokenOutMismatch.selector);
-        pointSellingController.executePointSale(
-            pToken, wallets, pointTokenizationVault, claims, 1000000000000000000, ""
-        );
+        vm.expectRevert(MinPriceTooLow.selector);
+        pointSellingController.executePointSale(pToken, tokenOut, wallets, pointTokenizationVault, claims, 1e17, "");
 
         vm.prank(user1);
-        pointSellingController.updateRequest(
-            user1,
-            pToken,
-            PointSaleRequest({active: true, tokenOut: tokenOut, minPrice: 1000000000000000000, recipient: user1})
+        pointSellingController.setUserPreferences(
+            user1, pToken, UserPreferences({minPrice: 1000000000000000000, recipient: user1})
         );
         claims[1] =
             Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
 
         vm.prank(admin);
         pointSellingController.executePointSale(
-            pToken, wallets, pointTokenizationVault, claims, 1000000000000000000, ""
+            pToken, tokenOut, wallets, pointTokenizationVault, claims, 1000000000000000000, ""
         );
 
         assertEq(tokenOut.balanceOf(user), tokenOut.balanceOf(user1));
