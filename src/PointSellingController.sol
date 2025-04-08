@@ -2,6 +2,7 @@
 pragma solidity 0.8.29;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {console} from "forge-std/console.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /// @dev Provided address for tokens iz zero
@@ -9,12 +10,6 @@ error ZeroAddressProvided();
 
 /// @dev users and claims arrays do not have the same length
 error ArrayLengthMismatch();
-
-/// @dev one of the provided requests is inactive
-error RequestInactive();
-
-/// @dev one or more requests have different tokenOut
-error TokenOutMismatch();
 
 /// @dev min price for pToken sale is lower than one or more user provided values
 error MinPriceTooLow();
@@ -25,9 +20,13 @@ error NotSafeOwner();
 /// @dev provided fee percentage too large
 error FeeTooLarge();
 
-struct PointSaleRequest {
-    bool active;
-    IERC20 tokenOut;
+event FeeUpdated(uint256 oldFee, uint256 newFee);
+
+event UserPreferencesUpdated(address indexed user, IERC20 indexed pToken, UserPreferences preferences);
+
+event PointSaleExecuted(IERC20 indexed pToken, uint256 amountOut, uint256 fee);
+
+struct UserPreferences {
     uint256 minPrice;
     address recipient;
 }
@@ -39,20 +38,28 @@ struct Claim {
     bytes32[] proof;
 }
 
-interface IPointMinter {
+interface IPointTokenizationVault {
     function claimPTokens(Claim calldata _claim, address _account, address _receiver) external;
     function trustReceiver(address _account, bool _isTrusted) external;
+    function claimedPTokens(address _account, bytes32 _pointsId) external view returns (uint256);
+    function multicall(bytes[] calldata calls) external;
 }
 
 interface ISafe {
     function isOwner(address _owner) external view returns (bool);
+    function getOwners() external view returns (address[] memory);
 }
+
+// NOTES
+// - should we use uni v4
+// make sure sale works with different ptokens
+// add test for no explicity preferences
 
 abstract contract PointSellingController is Ownable2Step {
     uint256 MAX_FEE = 1e17; // 10%
     uint256 FEE_PRECISION = 1e18;
 
-    mapping(address user => mapping(IERC20 pToken => PointSaleRequest request)) public requests;
+    mapping(address user => mapping(IERC20 pToken => UserPreferences preferences)) public userPreferences;
 
     uint256 public fee = 1e15;
 
@@ -62,74 +69,94 @@ abstract contract PointSellingController is Ownable2Step {
     /// @param newFee new fee percentage
     function setFeePercentage(uint256 newFee) external onlyOwner {
         require(newFee <= MAX_FEE, FeeTooLarge());
+        emit FeeUpdated(fee, newFee);
         fee = newFee;
     }
 
-    /// @dev Adds, updates or deactivates point selling request
+    /// @dev Adds, updates or deactivates user preferences
     /// Reverts if provided pToken address is zero address
-    /// Reverts if provided tokenOut is zero address
     /// @param rumpelWallet address of the user's rumpel wallet
     /// @param pToken address of the pToken
-    /// @param request sale request data
-    function updateRequest(address rumpelWallet, IERC20 pToken, PointSaleRequest calldata request) external {
+    /// @param preferences sale request data
+    function setUserPreferences(address rumpelWallet, IERC20 pToken, UserPreferences calldata preferences) external {
         require(address(pToken) != address(0), ZeroAddressProvided());
-        require(address(request.tokenOut) != address(0), ZeroAddressProvided());
 
         if (rumpelWallet != msg.sender && !ISafe(rumpelWallet).isOwner(msg.sender)) {
             revert NotSafeOwner();
         }
 
-        requests[rumpelWallet][pToken] = request;
+        userPreferences[rumpelWallet][pToken] = preferences;
+
+        emit UserPreferencesUpdated(rumpelWallet, pToken, preferences);
     }
 
-    /// @dev Executes batch point sale. Each user needs to register this contract as a trusted reciever.
+    /// @dev Executes batch point sale. Each user needs to add this contract as a trusted reciever via the Rumpel Point Tokenization Vault.
     /// Reverts if @param claims and @param users have different length
     /// Reverts if batch requests do not have the same pTokenIn and tokenOut
     /// Reverts if one of the requests is not active
     /// Assumes that provided pointId from @param claims will match actual @param pToken
     /// @param pToken address of the pToken being sold
+    /// @param tokenOut address of the token to be swapped for
     /// @param wallets rumpel wallets of users selling pTokens
-    /// @param pointMinter address of the contract to mint points
+    /// @param pointTokenizationVault address of the contract to mint points
     /// @param claims claims for each user's points
     /// @param minPrice minimum price for selling pTokens
     /// @param additionalParams additional swap params, specific to concrete implementation
     function executePointSale(
         IERC20 pToken,
+        IERC20 tokenOut,
         address[] calldata wallets,
-        IPointMinter pointMinter,
+        IPointTokenizationVault pointTokenizationVault,
         Claim[] calldata claims,
         uint256 minPrice,
         bytes calldata additionalParams
     ) external onlyOwner {
         require(wallets.length == claims.length, ArrayLengthMismatch());
-        IERC20 tokenOut = requests[wallets[0]][pToken].tokenOut;
 
-        PointSaleRequest[] memory requests_ = new PointSaleRequest[](wallets.length);
-        uint256 totalPoints;
+        uint256 totalPTokens;
+
+        bytes[] memory calls = new bytes[](wallets.length);
 
         for (uint256 i = 0; i < wallets.length; i++) {
-            requests_[i] = requests[wallets[i]][pToken];
-            require(requests_[i].active, RequestInactive());
-            require(tokenOut == requests_[i].tokenOut, TokenOutMismatch());
-            require(minPrice >= requests_[i].minPrice, MinPriceTooLow());
+            // If the user has set a minimum price, it must be met. Default minimum price is 0.
+            require(minPrice >= userPreferences[wallets[i]][pToken].minPrice, MinPriceTooLow());
 
-            pointMinter.claimPTokens(claims[i], wallets[i], address(this));
-            totalPoints += claims[i].amountToClaim;
+            // Can only be done for users that have added this contract as a trusted receiver.
+            // We assume that if they have done this, they have opted into passive point selling.
+            calls[i] = abi.encodeCall(pointTokenizationVault.claimPTokens, (claims[i], wallets[i], address(this)));
+
+            totalPTokens += claims[i].amountToClaim;
         }
 
-        uint256 amountOut = swap(pToken, tokenOut, totalPoints, minPrice, additionalParams);
+        // Claim all users' points in one multicall.
+        pointTokenizationVault.multicall(calls);
 
-        /// To be discussed if fee should be paid in point token instead
+        // Swap all pTokens for tokenOut.
+        // We assume that the path passed in through additionalParams is the best path to swap pTokens for tokenOut.
+        uint256 amountOut = swap(pToken, tokenOut, totalPTokens, minPrice, additionalParams);
+
+        /// To be discussed if fee should be paid in point token instead.
         if (fee > 0) {
             tokenOut.transfer(msg.sender, amountOut * fee / FEE_PRECISION);
         }
 
+        // Transfer tokenOut to users.
         for (uint256 i = 0; i < wallets.length; i++) {
+            // If the user has set a recipient, transfer the tokenOut to them.
+            address recipient = userPreferences[wallets[i]][pToken].recipient;
+
+            // If not set, transfer to the owner of the rumpel wallet in the first owner slot.
+            if (recipient == address(0)) {
+                address[] memory walletOwners = ISafe(wallets[i]).getOwners();
+                recipient = walletOwners[0];
+            }
+
             tokenOut.transfer(
-                requests[wallets[i]][pToken].recipient,
-                (amountOut * (FEE_PRECISION - fee) / FEE_PRECISION) * claims[i].amountToClaim / totalPoints
+                recipient, (amountOut * (FEE_PRECISION - fee) / FEE_PRECISION) * claims[i].amountToClaim / totalPTokens
             );
         }
+
+        emit PointSaleExecuted(pToken, amountOut, fee);
     }
 
     /// @dev Abstract function used to implement swaps from pToken to requested token out
