@@ -17,18 +17,20 @@ interface ISwapRouter {
 }
 
 contract UniswapV3PointSellingController is PointSellingController {
-    IERC20 internal constant kpef5 = IERC20(0x4A4E500eC5dE798cc3D229C544223E65511A9A39);
     ISwapRouter internal constant SWAP_ROUTER = ISwapRouter(address(0xE592427A0AEce92De3Edee1F18E0157C05861564));
 
     constructor(address initialOwner) PointSellingController(initialOwner) {}
 
-    function swap(IERC20, IERC20 tokenOut, uint256 amountIn, uint256 minPrice, bytes calldata additionalParams)
+    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minPrice, bytes calldata additionalParams)
         internal
         virtual
         override
         returns (uint256 amountOut)
     {
-        kpef5.approve(address(SWAP_ROUTER), amountIn);
+        if (tokenIn.allowance(address(this), address(SWAP_ROUTER)) < amountIn) {
+            tokenIn.approve(address(SWAP_ROUTER), amountIn);
+        }
+
         (bytes memory path, uint256 deadline) = abi.decode(additionalParams, (bytes, uint256));
         return SWAP_ROUTER.exactInput(
             ExactInputParams({

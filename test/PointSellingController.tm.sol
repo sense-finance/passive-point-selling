@@ -55,37 +55,31 @@ contract PointSellingControllerMainnetTest is Test {
         // Address passed in is not a safe
         vm.prank(rumpelUserSam);
         vm.expectRevert();
+        IERC20[] memory pTokens = new IERC20[](1);
+        pTokens[0] = IERC20(address(kpEF5));
+        uint256[] memory minPrices = new uint256[](1);
+        minPrices[0] = 1000000000000000000;
         pointSellingController.setUserPreferences(
-            makeAddr("random wallet"),
-            IERC20(address(kpEF5)),
-            UserPreferences({minPrice: 1000000000000000000, recipient: rumpelUserSam})
+            makeAddr("random wallet"), makeAddr("random wallet"), pTokens, minPrices
         );
 
         // Address passed in is a safe but Rumpel user is not an owner
         vm.prank(rumpelUserSam);
-        vm.expectRevert(NotSafeOwner.selector);
-        pointSellingController.setUserPreferences(
-            randomRumpelWallet,
-            IERC20(address(kpEF5)),
-            UserPreferences({minPrice: 1000000000000000000, recipient: rumpelUserSam})
-        );
+        vm.expectRevert(abi.encodeWithSelector(NotSafeOwner.selector, rumpelUserSam, randomRumpelWallet));
+        pointSellingController.setUserPreferences(randomRumpelWallet, rumpelUserSam, pTokens, minPrices);
 
         // Rumpel user is owner of the rumpel wallet
         vm.prank(rumpelUserSam);
-        pointSellingController.setUserPreferences(
-            samRumpelWallet,
-            IERC20(address(kpEF5)),
-            UserPreferences({minPrice: 1000000000000000000, recipient: rumpelUserSam})
-        );
+        pointSellingController.setUserPreferences(samRumpelWallet, rumpelUserSam, pTokens, minPrices);
     }
 
     function test_simpleExecutePointSale() public {
         vm.prank(rumpelUserSam);
-        pointSellingController.setUserPreferences(
-            samRumpelWallet,
-            IERC20(address(kpEF5)),
-            UserPreferences({minPrice: 1000000000000000000, recipient: rumpelUserSam})
-        );
+        IERC20[] memory pTokens = new IERC20[](1);
+        pTokens[0] = IERC20(address(kpEF5));
+        uint256[] memory minPrices = new uint256[](1);
+        minPrices[0] = 1000000000000000000;
+        pointSellingController.setUserPreferences(samRumpelWallet, rumpelUserSam, pTokens, minPrices);
 
         // sam (via rumpel wallet) trust point selling controller
         vm.prank(samRumpelWallet);
@@ -130,11 +124,11 @@ contract PointSellingControllerMainnetTest is Test {
         // --- Setup Preferences ---
         uint256 minPricePerPToken = 0; // Example: min 0 USDC per pToken means we accept any price
         vm.prank(rumpelUserSam);
-        uniswapV3PointSellingController.setUserPreferences(
-            samRumpelWallet,
-            IERC20(address(kpEF5)),
-            UserPreferences({minPrice: minPricePerPToken, recipient: rumpelUserSam})
-        );
+        IERC20[] memory pTokens = new IERC20[](1);
+        pTokens[0] = IERC20(address(kpEF5));
+        uint256[] memory minPrices = new uint256[](1);
+        minPrices[0] = minPricePerPToken;
+        uniswapV3PointSellingController.setUserPreferences(samRumpelWallet, rumpelUserSam, pTokens, minPrices);
 
         // --- Trust Controller ---
         vm.prank(samRumpelWallet);

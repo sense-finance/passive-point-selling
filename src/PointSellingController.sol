@@ -2,7 +2,6 @@
 pragma solidity 0.8.29;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {console} from "forge-std/console.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 /// @dev Provided address for tokens iz zero
@@ -15,19 +14,22 @@ error ArrayLengthMismatch();
 error MinPriceTooLow();
 
 /// @dev user is not a rumpel wallet owner
-error NotSafeOwner();
+error NotSafeOwner(address sender, address wallet);
 
 /// @dev provided fee percentage too large
 error FeeTooLarge();
 
 event FeeUpdated(uint256 oldFee, uint256 newFee);
 
-event UserPreferencesUpdated(address indexed user, IERC20 indexed pToken, UserPreferences preferences);
+event UserPreferencesUpdated(address indexed user, address recipient, IERC20[] indexed pTokens, uint256[] minPrices);
 
 event PointSaleExecuted(IERC20 indexed pToken, uint256 amountOut, uint256 fee);
 
+/// @notice User preferences for passive point selling
+/// @param minPrice Minimum price user will accept for their points
+/// @param recipient Address that will receive proceeds (zero address = rumpel wallet owner)
 struct UserPreferences {
-    uint256 minPrice;
+    mapping(IERC20 pToken => uint256 minPrice) minPrices;
     address recipient;
 }
 
@@ -56,10 +58,10 @@ interface ISafe {
 // add test for no explicity preferences
 
 abstract contract PointSellingController is Ownable2Step {
-    uint256 MAX_FEE = 1e17; // 10%
-    uint256 FEE_PRECISION = 1e18;
+    uint256 public constant MAX_FEE = 1e17; // 10%
+    uint256 public constant FEE_PRECISION = 1e18;
 
-    mapping(address user => mapping(IERC20 pToken => UserPreferences preferences)) public userPreferences;
+    mapping(address wallet => UserPreferences preferences) public userPreferences;
 
     uint256 public fee = 1e15;
 
@@ -76,32 +78,47 @@ abstract contract PointSellingController is Ownable2Step {
     /// @dev Adds, updates or deactivates user preferences
     /// Reverts if provided pToken address is zero address
     /// @param rumpelWallet address of the user's rumpel wallet
-    /// @param pToken address of the pToken
-    /// @param preferences sale request data
-    function setUserPreferences(address rumpelWallet, IERC20 pToken, UserPreferences calldata preferences) external {
-        require(address(pToken) != address(0), ZeroAddressProvided());
+    /// @param recipient address of the recipient
+    /// @param pTokens array of pToken addresses
+    /// @param minPrices array of minimum prices for each pToken
+    function setUserPreferences(
+        address rumpelWallet,
+        address recipient,
+        IERC20[] calldata pTokens,
+        uint256[] calldata minPrices
+    ) external {
+        require(pTokens.length == minPrices.length, ArrayLengthMismatch());
+        // TODO: ensure it is a rumpel wallet?
+        // TODO: safe transfer and approve
 
         if (rumpelWallet != msg.sender && !ISafe(rumpelWallet).isOwner(msg.sender)) {
-            revert NotSafeOwner();
+            revert NotSafeOwner(msg.sender, rumpelWallet);
         }
 
-        userPreferences[rumpelWallet][pToken] = preferences;
+        userPreferences[rumpelWallet].recipient = recipient;
+        for (uint256 i = 0; i < pTokens.length; i++) {
+            userPreferences[rumpelWallet].minPrices[pTokens[i]] = minPrices[i];
+        }
 
-        emit UserPreferencesUpdated(rumpelWallet, pToken, preferences);
+        emit UserPreferencesUpdated(rumpelWallet, recipient, pTokens, minPrices);
     }
 
-    /// @dev Executes batch point sale. Each user needs to add this contract as a trusted reciever via the Rumpel Point Tokenization Vault.
-    /// Reverts if @param claims and @param users have different length
-    /// Reverts if batch requests do not have the same pTokenIn and tokenOut
-    /// Reverts if one of the requests is not active
-    /// Assumes that provided pointId from @param claims will match actual @param pToken
-    /// @param pToken address of the pToken being sold
-    /// @param tokenOut address of the token to be swapped for
-    /// @param wallets rumpel wallets of users selling pTokens
-    /// @param pointTokenizationVault address of the contract to mint points
-    /// @param claims claims for each user's points
-    /// @param minPrice minimum price for selling pTokens
-    /// @param additionalParams additional swap params, specific to concrete implementation
+    /// @notice Returns the minimum price set by a user for a specific pToken
+    /// @param wallet The user's wallet address
+    /// @param pToken The pToken address
+    /// @return The minimum price set, or 0 if not set
+    function getUserMinPrice(address wallet, IERC20 pToken) external view returns (uint256) {
+        return userPreferences[wallet].minPrices[pToken];
+    }
+
+    /// @notice Executes a point sale for multiple users
+    /// @param pToken Address of the pToken being sold
+    /// @param tokenOut Address of the token to receive
+    /// @param wallets Array of user wallet addresses
+    /// @param pointTokenizationVault The vault contract for claiming points
+    /// @param claims Array of claim data for each wallet
+    /// @param minPrice Minimum price floor for all transactions
+    /// @param additionalParams Implementation-specific swap parameters
     function executePointSale(
         IERC20 pToken,
         IERC20 tokenOut,
@@ -111,21 +128,24 @@ abstract contract PointSellingController is Ownable2Step {
         uint256 minPrice,
         bytes calldata additionalParams
     ) external onlyOwner {
-        require(wallets.length == claims.length, ArrayLengthMismatch());
+        uint256 numWallets = wallets.length;
+        require(numWallets == claims.length, ArrayLengthMismatch());
 
         uint256 totalPTokens;
 
-        bytes[] memory calls = new bytes[](wallets.length);
+        bytes[] memory calls = new bytes[](numWallets);
 
-        for (uint256 i = 0; i < wallets.length; i++) {
+        for (uint256 i = 0; i < numWallets; i++) {
             // If the user has set a minimum price, it must be met. Default minimum price is 0.
-            require(minPrice >= userPreferences[wallets[i]][pToken].minPrice, MinPriceTooLow());
+            require(minPrice >= userPreferences[wallets[i]].minPrices[pToken], MinPriceTooLow());
 
             // Can only be done for users that have added this contract as a trusted receiver.
             // We assume that if they have done this, they have opted into passive point selling.
             calls[i] = abi.encodeCall(pointTokenizationVault.claimPTokens, (claims[i], wallets[i], address(this)));
 
-            totalPTokens += claims[i].amountToClaim;
+            unchecked {
+                totalPTokens += claims[i].amountToClaim;
+            }
         }
 
         // Claim all users' points in one multicall.
@@ -135,25 +155,27 @@ abstract contract PointSellingController is Ownable2Step {
         // We assume that the path passed in through additionalParams is the best path to swap pTokens for tokenOut.
         uint256 amountOut = swap(pToken, tokenOut, totalPTokens, minPrice, additionalParams);
 
-        /// To be discussed if fee should be paid in point token instead.
+        uint256 feeAmount = amountOut * fee / FEE_PRECISION;
+        uint256 remainingAmount = amountOut - feeAmount;
+
         if (fee > 0) {
-            tokenOut.transfer(msg.sender, amountOut * fee / FEE_PRECISION);
+            tokenOut.transfer(msg.sender, feeAmount);
         }
 
         // Transfer tokenOut to users.
         for (uint256 i = 0; i < wallets.length; i++) {
             // If the user has set a recipient, transfer the tokenOut to them.
-            address recipient = userPreferences[wallets[i]][pToken].recipient;
+            address recipient = userPreferences[wallets[i]].recipient;
 
-            // If not set, transfer to the owner of the rumpel wallet in the first owner slot.
+            // If not set, transfer to the owner of the rumpel wallet existing in the first slot.
             if (recipient == address(0)) {
                 address[] memory walletOwners = ISafe(wallets[i]).getOwners();
                 recipient = walletOwners[0];
             }
 
-            tokenOut.transfer(
-                recipient, (amountOut * (FEE_PRECISION - fee) / FEE_PRECISION) * claims[i].amountToClaim / totalPTokens
-            );
+            // Calculate each user's share proportional to their contribution
+            uint256 walletShare = (remainingAmount * claims[i].amountToClaim) / totalPTokens;
+            tokenOut.transfer(recipient, walletShare);
         }
 
         emit PointSaleExecuted(pToken, amountOut, fee);
