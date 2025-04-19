@@ -3,7 +3,7 @@ pragma solidity 0.8.29;
 
 import {Test} from "forge-std/Test.sol";
 import {console} from "forge-std/console.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC20} from "solmate/tokens/ERC20.sol";
 
 import {
     PointSellingController,
@@ -14,10 +14,19 @@ import {
 } from "../src/PointSellingController.sol";
 import {UniswapV3PointSellingController} from "../src/UniswapV3PointSelling.sol";
 
+// tests:
+// - multiple pTokens
+// - multiple users
+// - multiple wallets
+// - multiple wallets with different preferences
+// - multiple wallets with different pTokens
+// - multiple wallets with different min prices
+// - multiple wallets with different recipients
+
 contract PointSellingControllerInstance is PointSellingController {
     constructor(address _owner) PointSellingController(_owner) {}
 
-    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minReturn, bytes calldata additionalParams)
+    function swap(ERC20 tokenIn, ERC20 tokenOut, uint256 amountIn, uint256 minReturn, bytes calldata additionalParams)
         internal
         override
         returns (uint256 amountOut)
@@ -34,9 +43,9 @@ contract PointSellingControllerMainnetTest is Test {
 
     // Mainnet addresses
     address kpEF5 = 0x4A4E500eC5dE798cc3D229C544223E65511A9A39;
-    IERC20 USDC = IERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
-    IERC20 WETH = IERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
-    IERC20 ETHFI = IERC20(0xFe0c30065B384F05761f15d0CC899D4F9F9Cc0eB);
+    ERC20 USDC = ERC20(0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48);
+    ERC20 WETH = ERC20(0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2);
+    ERC20 ETHFI = ERC20(0xFe0c30065B384F05761f15d0CC899D4F9F9Cc0eB);
     IPointTokenizationVault pointTokenizationVault = IPointTokenizationVault(0xe47F9Dbbfe98d6930562017ee212C1A1Ae45ba61);
 
     PointSellingController public pointSellingController;
@@ -55,8 +64,8 @@ contract PointSellingControllerMainnetTest is Test {
         // Address passed in is not a safe
         vm.prank(rumpelUserSam);
         vm.expectRevert();
-        IERC20[] memory pTokens = new IERC20[](1);
-        pTokens[0] = IERC20(address(kpEF5));
+        ERC20[] memory pTokens = new ERC20[](1);
+        pTokens[0] = ERC20(address(kpEF5));
         uint256[] memory minPrices = new uint256[](1);
         minPrices[0] = 1000000000000000000;
         pointSellingController.setUserPreferences(
@@ -75,8 +84,8 @@ contract PointSellingControllerMainnetTest is Test {
 
     function test_simpleExecutePointSale() public {
         vm.prank(rumpelUserSam);
-        IERC20[] memory pTokens = new IERC20[](1);
-        pTokens[0] = IERC20(address(kpEF5));
+        ERC20[] memory pTokens = new ERC20[](1);
+        pTokens[0] = ERC20(address(kpEF5));
         uint256[] memory minPrices = new uint256[](1);
         minPrices[0] = 1000000000000000000;
         pointSellingController.setUserPreferences(samRumpelWallet, rumpelUserSam, pTokens, minPrices);
@@ -116,7 +125,7 @@ contract PointSellingControllerMainnetTest is Test {
 
         vm.prank(admin);
         pointSellingController.executePointSale(
-            IERC20(address(kpEF5)), USDC, wallets, pointTokenizationVault, claims, 1000000000000000000, ""
+            ERC20(address(kpEF5)), USDC, wallets, pointTokenizationVault, claims, 1000000000000000000, ""
         );
     }
 
@@ -124,8 +133,8 @@ contract PointSellingControllerMainnetTest is Test {
         // --- Setup Preferences ---
         uint256 minPricePerPToken = 0; // Example: min 0 USDC per pToken means we accept any price
         vm.prank(rumpelUserSam);
-        IERC20[] memory pTokens = new IERC20[](1);
-        pTokens[0] = IERC20(address(kpEF5));
+        ERC20[] memory pTokens = new ERC20[](1);
+        pTokens[0] = ERC20(address(kpEF5));
         uint256[] memory minPrices = new uint256[](1);
         minPrices[0] = minPricePerPToken;
         uniswapV3PointSellingController.setUserPreferences(samRumpelWallet, rumpelUserSam, pTokens, minPrices);
@@ -174,7 +183,7 @@ contract PointSellingControllerMainnetTest is Test {
         // --- Execute Sale ---
         uint256 usdcBalanceBeforeRecipient = USDC.balanceOf(rumpelUserSam);
         uint256 usdcBalanceBeforeAdmin = USDC.balanceOf(admin);
-        uint256 contractPTokensBefore = IERC20(address(kpEF5)).balanceOf(address(uniswapV3PointSellingController));
+        uint256 contractPTokensBefore = ERC20(address(kpEF5)).balanceOf(address(uniswapV3PointSellingController));
 
         // The minPrice for executePointSale should aggregate the minimums from preferences.
         // Here, we use the single user's minPrice. If multiple users, it should be the minimum of all their required prices *per pToken*.
@@ -182,11 +191,11 @@ contract PointSellingControllerMainnetTest is Test {
 
         vm.prank(admin);
         uniswapV3PointSellingController.executePointSale(
-            IERC20(address(kpEF5)), USDC, wallets, pointTokenizationVault, claims, executeMinPrice, additionalParams
+            ERC20(address(kpEF5)), USDC, wallets, pointTokenizationVault, claims, executeMinPrice, additionalParams
         );
 
         // --- Assertions ---
-        uint256 contractPTokensAfter = IERC20(address(kpEF5)).balanceOf(address(uniswapV3PointSellingController));
+        uint256 contractPTokensAfter = ERC20(address(kpEF5)).balanceOf(address(uniswapV3PointSellingController));
         uint256 usdcBalanceAfterRecipient = USDC.balanceOf(rumpelUserSam);
         uint256 usdcBalanceAfterAdmin = USDC.balanceOf(admin);
 

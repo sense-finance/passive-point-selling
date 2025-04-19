@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.29;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {ERC20} from "solmate/tokens/ERC20.sol";
+import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
 
 /// @dev Provided address for tokens iz zero
 error ZeroAddressProvided();
@@ -21,15 +22,15 @@ error FeeTooLarge();
 
 event FeeUpdated(uint256 oldFee, uint256 newFee);
 
-event UserPreferencesUpdated(address indexed user, address recipient, IERC20[] indexed pTokens, uint256[] minPrices);
+event UserPreferencesUpdated(address indexed user, address recipient, ERC20[] indexed pTokens, uint256[] minPrices);
 
-event PointSaleExecuted(IERC20 indexed pToken, uint256 amountOut, uint256 fee);
+event PointSaleExecuted(ERC20 indexed pToken, uint256 amountOut, uint256 fee);
 
 /// @notice User preferences for passive point selling
 /// @param minPrice Minimum price user will accept for their points
 /// @param recipient Address that will receive proceeds (zero address = rumpel wallet owner)
 struct UserPreferences {
-    mapping(IERC20 pToken => uint256 minPrice) minPrices;
+    mapping(ERC20 pToken => uint256 minPrice) minPrices;
     address recipient;
 }
 
@@ -52,12 +53,9 @@ interface ISafe {
     function getOwners() external view returns (address[] memory);
 }
 
-// NOTES
-// - should we use uni v4
-// make sure sale works with different ptokens
-// add test for no explicity preferences
-
 abstract contract PointSellingController is Ownable2Step {
+    using SafeTransferLib for ERC20;
+
     uint256 public constant MAX_FEE = 1e17; // 10%
     uint256 public constant FEE_PRECISION = 1e18;
 
@@ -84,7 +82,7 @@ abstract contract PointSellingController is Ownable2Step {
     function setUserPreferences(
         address rumpelWallet,
         address recipient,
-        IERC20[] calldata pTokens,
+        ERC20[] calldata pTokens,
         uint256[] calldata minPrices
     ) external {
         require(pTokens.length == minPrices.length, ArrayLengthMismatch());
@@ -107,7 +105,7 @@ abstract contract PointSellingController is Ownable2Step {
     /// @param wallet The user's wallet address
     /// @param pToken The pToken address
     /// @return The minimum price set, or 0 if not set
-    function getUserMinPrice(address wallet, IERC20 pToken) external view returns (uint256) {
+    function getUserMinPrice(address wallet, ERC20 pToken) external view returns (uint256) {
         return userPreferences[wallet].minPrices[pToken];
     }
 
@@ -120,8 +118,8 @@ abstract contract PointSellingController is Ownable2Step {
     /// @param minPrice Minimum price floor for all transactions
     /// @param additionalParams Implementation-specific swap parameters
     function executePointSale(
-        IERC20 pToken,
-        IERC20 tokenOut,
+        ERC20 pToken,
+        ERC20 tokenOut,
         address[] calldata wallets,
         IPointTokenizationVault pointTokenizationVault,
         Claim[] calldata claims,
@@ -159,7 +157,7 @@ abstract contract PointSellingController is Ownable2Step {
         uint256 remainingAmount = amountOut - feeAmount;
 
         if (fee > 0) {
-            tokenOut.transfer(msg.sender, feeAmount);
+            tokenOut.safeTransfer(msg.sender, feeAmount);
         }
 
         // Transfer tokenOut to users.
@@ -175,7 +173,7 @@ abstract contract PointSellingController is Ownable2Step {
 
             // Calculate each user's share proportional to their contribution
             uint256 walletShare = (remainingAmount * claims[i].amountToClaim) / totalPTokens;
-            tokenOut.transfer(recipient, walletShare);
+            tokenOut.safeTransfer(recipient, walletShare);
         }
 
         emit PointSaleExecuted(pToken, amountOut, fee);
@@ -188,7 +186,7 @@ abstract contract PointSellingController is Ownable2Step {
     /// @param amountIn amount of @param tokenIn to be swapped
     /// @param minPrice minimal price in @param tokenOut precision for the swap
     /// @param additionalParams additional swap params, specific to concrete implementation
-    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minPrice, bytes calldata additionalParams)
+    function swap(ERC20 tokenIn, ERC20 tokenOut, uint256 amountIn, uint256 minPrice, bytes calldata additionalParams)
         internal
         virtual
         returns (uint256 amountOut);

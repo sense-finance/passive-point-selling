@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.29;
 
-import {IERC20, PointSellingController} from "./PointSellingController.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import {ERC20} from "solmate/tokens/ERC20.sol";
+
+import {PointSellingController} from "./PointSellingController.sol";
 
 struct ExactInputParams {
     bytes path;
@@ -21,7 +22,7 @@ contract UniswapV3PointSellingController is PointSellingController {
 
     constructor(address initialOwner) PointSellingController(initialOwner) {}
 
-    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minPrice, bytes calldata additionalParams)
+    function swap(ERC20 tokenIn, ERC20 tokenOut, uint256 amountIn, uint256 minPrice, bytes calldata additionalParams)
         internal
         virtual
         override
@@ -38,7 +39,7 @@ contract UniswapV3PointSellingController is PointSellingController {
                 recipient: address(this),
                 deadline: deadline,
                 amountIn: amountIn,
-                amountOutMinimum: minPrice * amountIn / (10 ** IERC20Metadata(address(tokenOut)).decimals())
+                amountOutMinimum: minPrice * amountIn / (10 ** tokenOut.decimals())
             })
         );
     }

@@ -2,9 +2,8 @@
 pragma solidity 0.8.29;
 
 import {Test} from "forge-std/Test.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
-import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {MockERC20, ERC20} from "solmate/test/utils/mocks/MockERC20.sol";
+
 import {console} from "forge-std/console.sol";
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
@@ -21,14 +20,6 @@ import {
     FeeTooLarge
 } from "../src/PointSellingController.sol";
 
-contract ERC20Mock is ERC20 {
-    constructor(string memory name, string memory symbol) ERC20(name, symbol) {}
-
-    function mint(address to, uint256 amount) external {
-        return _mint(to, amount);
-    }
-}
-
 error Slippage();
 
 contract UniversalPoolMock {
@@ -38,11 +29,11 @@ contract UniversalPoolMock {
         nextSwapRate = rate;
     }
 
-    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minReturn)
+    function swap(ERC20 tokenIn, ERC20 tokenOut, uint256 amountIn, uint256 minReturn)
         external
         returns (uint256 amountOut)
     {
-        uint256 tokenOutPrecision = 10 ** IERC20Metadata(address(tokenOut)).decimals();
+        uint256 tokenOutPrecision = 10 ** ERC20(address(tokenOut)).decimals();
         amountOut = amountIn * nextSwapRate / tokenOutPrecision;
         require(amountOut >= minReturn, Slippage());
 
@@ -56,23 +47,21 @@ contract PointSellingControllerMock is PointSellingController {
 
     constructor(address _owner) PointSellingController(_owner) {}
 
-    function swap(IERC20 tokenIn, IERC20 tokenOut, uint256 amountIn, uint256 minPrice, bytes calldata)
+    function swap(ERC20 tokenIn, ERC20 tokenOut, uint256 amountIn, uint256 minPrice, bytes calldata)
         internal
         override
         returns (uint256 amountOut)
     {
         tokenIn.approve(address(amm), amountIn);
-        return amm.swap(
-            tokenIn, tokenOut, amountIn, minPrice * amountIn / (10 ** IERC20Metadata(address(tokenOut)).decimals())
-        );
+        return amm.swap(tokenIn, tokenOut, amountIn, minPrice * amountIn / (10 ** tokenOut.decimals()));
     }
 }
 
 contract PointTokenizationVaultMock is IPointTokenizationVault {
-    mapping(bytes32 => ERC20Mock) public pTokens;
+    mapping(bytes32 => MockERC20) public pTokens;
 
     constructor() {
-        pTokens[bytes32(uint256(1))] = new ERC20Mock("pToken1", "PTK1");
+        pTokens[bytes32(uint256(1))] = new MockERC20("pToken1", "PTK1", 18);
     }
 
     function claimPTokens(Claim calldata _claim, address, address _receiver) external {
@@ -115,17 +104,17 @@ contract PointSellingControllerTest is Test {
     address user1 = makeAddr("user1");
 
     PointTokenizationVaultMock public pointTokenizationVault = new PointTokenizationVaultMock();
-    ERC20Mock public tokenOut = new ERC20Mock("token out", "TKNO");
+    MockERC20 public tokenOut = new MockERC20("token out", "TKNO", 18);
 
     PointSellingControllerMock public pointSellingController;
-    IERC20 pToken;
+    ERC20 pToken;
 
     function setUp() public {
         pointSellingController = new PointSellingControllerMock(admin);
-        pToken = IERC20(pointTokenizationVault.pTokens(bytes32(uint256(1))));
+        pToken = ERC20(pointTokenizationVault.pTokens(bytes32(uint256(1))));
 
         tokenOut.mint(address(pointSellingController.amm()), 1e27);
-        ERC20Mock(address(pToken)).mint(address(pointSellingController.amm()), 1e27);
+        MockERC20(address(pToken)).mint(address(pointSellingController.amm()), 1e27);
     }
 
     function test_accessControl() public {
@@ -156,14 +145,14 @@ contract PointSellingControllerTest is Test {
         address rumpelWallet = address(new RumpelWalletMock(makeAddr("random owner")));
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(NotSafeOwner.selector, user, rumpelWallet));
-        IERC20[] memory pTokens = new IERC20[](1);
-        pTokens[0] = IERC20(address(1));
+        ERC20[] memory pTokens = new ERC20[](1);
+        pTokens[0] = ERC20(address(1));
         uint256[] memory minPrices = new uint256[](1);
         minPrices[0] = 1000000000000000000;
         pointSellingController.setUserPreferences(rumpelWallet, address(0), pTokens, minPrices);
 
         vm.prank(user);
-        pTokens[0] = IERC20(address(1));
+        pTokens[0] = ERC20(address(1));
         minPrices[0] = 1000000000000000000;
         pointSellingController.setUserPreferences(user, rumpelWallet, pTokens, minPrices);
 
@@ -183,8 +172,8 @@ contract PointSellingControllerTest is Test {
         );
 
         vm.prank(user);
-        IERC20[] memory pTokens = new IERC20[](1);
-        pTokens[0] = IERC20(address(pToken));
+        ERC20[] memory pTokens = new ERC20[](1);
+        pTokens[0] = ERC20(address(pToken));
         uint256[] memory minPrices = new uint256[](1);
         minPrices[0] = 1000000000000000000;
         pointSellingController.setUserPreferences(user, user, pTokens, minPrices);
