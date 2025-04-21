@@ -7,21 +7,19 @@ import {ERC20} from "solmate/tokens/ERC20.sol";
 import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 
-import {console} from "forge-std/console.sol";
-
-/// @dev users and claims arrays do not have the same length.
+/// @dev users and claims arrays do not have the same length
 error ArrayLengthMismatch();
 
-/// @dev min price for pToken sale is lower than one or more user provided values.
+/// @dev min price for pToken sale is lower than one or more user provided values
 error MinPriceTooLow();
 
-/// @dev user is not a rumpel wallet owner.
+/// @dev user is not a rumpel wallet owner
 error NotSafeOwner(address sender, address wallet);
 
-/// @dev provided fee percentage too large.
+/// @dev provided fee percentage too large
 error FeeTooLarge();
 
-/// @dev rumpel wallet has multiple owners.
+/// @dev rumpel wallet has multiple owners
 error MultipleOwners();
 
 event FeeUpdated(uint256 oldFee, uint256 newFee);
@@ -30,9 +28,9 @@ event UserPreferencesUpdated(address indexed user, address indexed recipient, ER
 
 event PointSaleExecuted(ERC20 indexed pToken, ERC20 indexed tokenOut, uint256 amountIn, uint256 amountOut, uint256 fee);
 
-/// @notice User preferences for passive point selling.
-/// @param minPrice Minimum price user will accept for their points. Scaled by tokenOut.decimals, expected per 1 unit tokenIn (pTokens always 18 decimals).
-/// @param recipient Address that will receive proceeds (zero address = rumpel wallet owner).
+/// @notice User preferences for passive point selling
+/// @param minPrice Minimum price user will accept for their points, scaled by tokenOut.decimals, expected per 1 unit tokenIn (pTokens always 18 decimals)
+/// @param recipient Address that will receive proceeds (zero address = rumpel wallet owner)
 struct UserPreferences {
     mapping(ERC20 pToken => uint256 minPrice) minPrices; // minPrice of 0 means any price is accepted.
     address recipient;
@@ -69,21 +67,21 @@ abstract contract PointSellingController is Ownable2Step {
 
     constructor(address initialOwner) Ownable(initialOwner) {}
 
-    /// @dev sets fee percentage. Reverts if fee is bigger than `MAX_FEE`.
-    /// @param newFee new fee percentage.
+    /// @dev sets fee percentage. Reverts if fee is bigger than `MAX_FEE`
+    /// @param newFee new fee percentage
     function setFeePercentage(uint256 newFee) external onlyOwner {
         require(newFee <= MAX_FEE, FeeTooLarge());
         emit FeeUpdated(fee, newFee);
         fee = newFee;
     }
 
-    /// @notice Store or update a user's preferences.
-    /// @dev Caller must be the Safe itself or one of its owners (if there is only one owner).
-    /// @param rumpelWallet  User's Safe (rumpel wallet).
-    /// @param recipient     Address that should receive sale proceeds (0x00 = Safe owner).
-    /// @param pTokens       Point tokens to set preferences for.
-    /// @param minPrices     Minimum acceptable prices, scaled to `tokenOut.decimals`.
-    ///                      It is on the operator to publicize what the tokenOut is, and announce/give a heads up to users when it changes.
+    /// @notice Store or update a user's preferences
+    /// @dev Caller must be the Safe itself or one of its owners (if there is only one owner)
+    /// @param rumpelWallet  User's Safe (rumpel wallet)
+    /// @param recipient     Address that should receive sale proceeds (0x00 = Safe owner)
+    /// @param pTokens       Point tokens to set preferences for
+    /// @param minPrices     Minimum acceptable prices, scaled to `tokenOut.decimals`
+    ///                      It is on the operator to publicize what the tokenOut is, and announce/give a heads up to users when it changes
     function setUserPreferences(
         address rumpelWallet,
         address recipient,
@@ -113,17 +111,17 @@ abstract contract PointSellingController is Ownable2Step {
         emit UserPreferencesUpdated(rumpelWallet, recipient, pTokens, minPrices);
     }
 
-    /// @notice Returns the minimum price set by a user for a specific pToken.
-    /// @param rumpelWallet The user's wallet address.
-    /// @param pToken The pToken address.
-    /// @return The minimum price set, or 0 if not set.
+    /// @notice Returns the minimum price set by a user for a specific pToken
+    /// @param rumpelWallet The user's wallet address
+    /// @param pToken The pToken address
+    /// @return The minimum price set, or 0 if not set
     function getMinPrice(address rumpelWallet, ERC20 pToken) external view returns (uint256) {
         return userPreferences[rumpelWallet].minPrices[pToken];
     }
 
-    /// @notice Returns the recipient address set by a user for a specific rumpel wallet.
-    /// @param rumpelWallet The user's wallet address.
-    /// @return The recipient address, or the zero address if not set.
+    /// @notice Returns the recipient address set by a user for a specific rumpel wallet
+    /// @param rumpelWallet The user's wallet address
+    /// @return The recipient address, or the zero address if not set
     function getRecipient(address rumpelWallet) external view returns (address) {
         return userPreferences[rumpelWallet].recipient;
     }
@@ -157,12 +155,14 @@ abstract contract PointSellingController is Ownable2Step {
         bytes[] memory calls = new bytes[](numWallets);
 
         for (uint256 i = 0; i < numWallets; i++) {
+            address wallet = wallets[i];
+
             // If the user has set a minimum price, it must be met. Default minimum price is 0.
-            require(minPrice >= userPreferences[wallets[i]].minPrices[pToken], MinPriceTooLow());
+            require(minPrice >= userPreferences[wallet].minPrices[pToken], MinPriceTooLow());
 
             // Can only be done for users that have added this contract as a trusted receiver.
             // We assume that if they have done this, they have opted into passive point selling.
-            calls[i] = abi.encodeCall(pointTokenizationVault.claimPTokens, (claims[i], wallets[i], address(this)));
+            calls[i] = abi.encodeCall(pointTokenizationVault.claimPTokens, (claims[i], wallet, address(this)));
 
             unchecked {
                 totalPTokens += claims[i].amountToClaim;
@@ -176,10 +176,11 @@ abstract contract PointSellingController is Ownable2Step {
         // We assume that the path passed in through additionalParams is the best path to swap pTokens for tokenOut.
         uint256 amountOut = swap(pToken, tokenOut, totalPTokens, minPrice, additionalParams);
 
-        uint256 feeAmount = amountOut * fee / FEE_PRECISION;
+        uint256 _fee = fee;
+        uint256 feeAmount = amountOut * _fee / FEE_PRECISION;
         uint256 remainingAmount = amountOut - feeAmount;
 
-        if (fee > 0) {
+        if (_fee > 0) {
             tokenOut.safeTransfer(msg.sender, feeAmount);
         }
 
@@ -198,21 +199,21 @@ abstract contract PointSellingController is Ownable2Step {
                 recipient = walletOwners[0];
             }
 
-            // Calculate each user's share proportional to their contribution
+            // Calculate each user's share proportional to their contribution.
             uint256 walletShare = FixedPointMathLib.mulDivDown(remainingAmount, claims[i].amountToClaim, totalPTokens); // Dust is accepted.
             tokenOut.safeTransfer(recipient, walletShare);
         }
 
-        emit PointSaleExecuted(pToken, tokenOut, totalPTokens, amountOut, fee);
+        emit PointSaleExecuted(pToken, tokenOut, totalPTokens, amountOut, _fee);
     }
 
-    /// @dev Abstract function used to implement swaps from pToken to requested token out.
-    /// Derived contract should implement particular strategies for swaps.
-    /// @param tokenIn address of the token to be swapped.
-    /// @param tokenOut address of the token to be swapped for.
-    /// @param amountIn amount of @param tokenIn to be swapped.
-    /// @param minPrice minimal price in @param tokenOut precision for the swap.
-    /// @param additionalParams additional swap params, specific to concrete implementation.
+    /// @dev Abstract function used to implement swaps from pToken to requested token out
+    /// Derived contract should implement particular strategies for swaps
+    /// @param tokenIn address of the token to be swapped
+    /// @param tokenOut address of the token to be swapped for
+    /// @param amountIn amount of @param tokenIn to be swapped
+    /// @param minPrice minimal price in @param tokenOut precision for the swap
+    /// @param additionalParams additional swap params, specific to concrete implementation
     function swap(ERC20 tokenIn, ERC20 tokenOut, uint256 amountIn, uint256 minPrice, bytes calldata additionalParams)
         internal
         virtual

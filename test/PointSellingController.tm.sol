@@ -13,17 +13,7 @@ from "../src/PointSellingController.sol"; // Import base interfaces/errors
 import {UniswapV3PointSellingController} from "../src/UniswapV3PointSelling.sol";
 
 // tests:
-// - fuzz
-// - usdc decimals
-// - non-rumpel wallet preferences
-// - multiple pTokens (Consider adding later)
-// - multiple users (Consider adding later)
-// - multiple wallets (Covered implicitly by testing with one)
-// - multiple wallets with different preferences (Consider adding later)
-// - multiple wallets with different pTokens (Consider adding later)
-// - multiple wallets with different min prices (Partially covered by testing non-zero min price)
-// - multiple wallets with different recipients (Consider adding later)
-// - Test minPrice logic thoroughly with USDC (6 decimals)
+// - multiple pTokens
 
 contract PointSellingControllerMainnetTest is Test {
     using FixedPointMathLib for uint256; // If needed for test calculations

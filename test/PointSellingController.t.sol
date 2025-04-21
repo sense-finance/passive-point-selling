@@ -3,6 +3,7 @@ pragma solidity 0.8.29;
 
 import {Test} from "forge-std/Test.sol";
 import {MockERC20, ERC20} from "solmate/test/utils/mocks/MockERC20.sol";
+import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 
 import {Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
@@ -30,8 +31,8 @@ contract UniversalPoolMock {
         external
         returns (uint256 amountOut)
     {
-        uint256 tokenOutPrecision = 10 ** ERC20(address(tokenOut)).decimals();
-        amountOut = amountIn * nextSwapRate / tokenOutPrecision;
+        uint256 precision = 10 ** ERC20(address(tokenOut)).decimals();
+        amountOut = amountIn * nextSwapRate / precision;
         require(amountOut >= minReturn, Slippage());
 
         tokenIn.transferFrom(msg.sender, address(this), amountIn);
@@ -61,18 +62,18 @@ contract PointTokenizationVaultMock is IPointTokenizationVault {
         pTokens[bytes32(uint256(1))] = new MockERC20("pToken1", "PTK1", 18);
     }
 
-    function claimPTokens(Claim calldata _claim, address, address _receiver) external {
-        pTokens[_claim.pointsId].mint(_receiver, _claim.amountToClaim);
+    function claimPTokens(Claim calldata c, address, address r) external {
+        pTokens[c.pointsId].mint(r, c.amountToClaim);
     }
 
-    function trustReceiver(address _account, bool _isTrusted) external {}
+    function trustReceiver(address, bool) external {}
 
-    function claimedPTokens(address _account, bytes32 _pointsId) external view returns (uint256) {}
+    function claimedPTokens(address, bytes32) external view returns (uint256) {}
 
     function multicall(bytes[] calldata calls) external {
-        for (uint256 i = 0; i < calls.length; i++) {
-            (bool success,) = address(this).call(calls[i]);
-            require(success, "Multicall failed");
+        for (uint256 i; i < calls.length; i++) {
+            (bool ok,) = address(this).call(calls[i]);
+            require(ok, "Multicall failed");
         }
     }
 }
@@ -88,10 +89,9 @@ contract RumpelWalletMock is ISafe {
         return owner == _owner;
     }
 
-    function getOwners() external view returns (address[] memory) {
-        address[] memory owners = new address[](1);
+    function getOwners() external view returns (address[] memory owners) {
+        owners = new address[](1);
         owners[0] = owner;
-        return owners;
     }
 }
 
@@ -100,30 +100,29 @@ contract PointSellingControllerTest is Test {
     address user = makeAddr("user");
     address user1 = makeAddr("user1");
 
-    PointTokenizationVaultMock public pointTokenizationVault = new PointTokenizationVaultMock();
+    PointTokenizationVaultMock public vault = new PointTokenizationVaultMock();
     MockERC20 public tokenOut = new MockERC20("token out", "TKNO", 18);
+    MockERC20 public tokenOut2 = new MockERC20("token out 2", "TKNO2", 6);
 
-    PointSellingControllerMock public pointSellingController;
+    PointSellingControllerMock public controller;
     ERC20 pToken;
 
     function setUp() public {
-        pointSellingController = new PointSellingControllerMock(admin);
-        pToken = ERC20(pointTokenizationVault.pTokens(bytes32(uint256(1))));
+        controller = new PointSellingControllerMock(admin);
+        pToken = ERC20(vault.pTokens(bytes32(uint256(1))));
 
-        tokenOut.mint(address(pointSellingController.amm()), 1e27);
-        MockERC20(address(pToken)).mint(address(pointSellingController.amm()), 1e27);
+        tokenOut.mint(address(controller.amm()), 1e27);
+        MockERC20(address(pToken)).mint(address(controller.amm()), 1e27);
     }
 
     function test_accessControl() public {
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, user));
-        pointSellingController.setFeePercentage(1);
+        controller.setFeePercentage(1);
 
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, user));
-        pointSellingController.executePointSale(
-            pToken, tokenOut, new address[](1), pointTokenizationVault, new Claim[](1), 1, ""
-        );
+        controller.executePointSale(pToken, tokenOut, new address[](1), vault, new Claim[](1), 1, "");
     }
 
     function test_setFeePercentage(uint256 newFee) public {
@@ -131,73 +130,196 @@ contract PointSellingControllerTest is Test {
         vm.prank(admin);
         if (newFee > 3e17) {
             vm.expectRevert(FeeTooLarge.selector);
-            pointSellingController.setFeePercentage(newFee);
+            controller.setFeePercentage(newFee);
         } else {
-            pointSellingController.setFeePercentage(newFee);
-            assertEq(pointSellingController.fee(), newFee);
+            controller.setFeePercentage(newFee);
+            assertEq(controller.fee(), newFee);
         }
     }
 
     function test_setUserPreferences() public {
-        address rumpelWallet = address(new RumpelWalletMock(user));
-        vm.expectRevert(abi.encodeWithSelector(NotSafeOwner.selector, address(this), rumpelWallet));
-        ERC20[] memory pTokens = new ERC20[](1);
-        pTokens[0] = ERC20(address(1));
+        address wallet = address(new RumpelWalletMock(user));
+        vm.expectRevert(abi.encodeWithSelector(NotSafeOwner.selector, address(this), wallet));
+        ERC20[] memory tokens = new ERC20[](1);
+        tokens[0] = ERC20(address(1));
         uint256[] memory minPrices = new uint256[](1);
-        minPrices[0] = 1000000000000000000;
-        pointSellingController.setUserPreferences(rumpelWallet, address(0), pTokens, minPrices);
+        minPrices[0] = 1e18;
+        controller.setUserPreferences(wallet, address(0), tokens, minPrices);
+
+        // evm revert if setting preferences for non-safe user EOA
+        vm.expectRevert();
+        controller.setUserPreferences(user, user, tokens, minPrices);
 
         vm.prank(user);
-        pTokens[0] = ERC20(address(1));
-        minPrices[0] = 1000000000000000000;
-        pointSellingController.setUserPreferences(rumpelWallet, user, pTokens, minPrices);
+        tokens[0] = ERC20(address(1));
+        minPrices[0] = 1e18;
+        controller.setUserPreferences(wallet, user, tokens, minPrices);
 
-        assertEq(pointSellingController.getRecipient(rumpelWallet), user);
-        assertEq(pointSellingController.getMinPrice(rumpelWallet, pTokens[0]), 1000000000000000000);
+        assertEq(controller.getRecipient(wallet), user);
+        assertEq(controller.getMinPrice(wallet, tokens[0]), 1e18);
     }
 
     function test_executePointSale() public {
-        address rumpelWallet = address(new RumpelWalletMock(user));
-        address rumpelWallet1 = address(new RumpelWalletMock(user1));
+        address wallet0 = address(new RumpelWalletMock(user));
+        address wallet1 = address(new RumpelWalletMock(user1));
 
         address[] memory wallets = new address[](2);
         Claim[] memory claims = new Claim[](1);
         vm.prank(admin);
         vm.expectRevert(ArrayLengthMismatch.selector);
-        pointSellingController.executePointSale(
-            pToken, tokenOut, wallets, pointTokenizationVault, claims, 1000000000000000000, ""
-        );
+        controller.executePointSale(pToken, tokenOut, wallets, vault, claims, 1e18, "");
 
         vm.prank(user);
-        ERC20[] memory pTokens = new ERC20[](1);
-        pTokens[0] = ERC20(address(pToken));
+        ERC20[] memory tokens = new ERC20[](1);
+        tokens[0] = ERC20(address(pToken));
         uint256[] memory minPrices = new uint256[](1);
-        minPrices[0] = 1000000000000000000;
-        pointSellingController.setUserPreferences(rumpelWallet, user, pTokens, minPrices);
+        minPrices[0] = 1e18;
+        controller.setUserPreferences(wallet0, user, tokens, minPrices);
 
         wallets = new address[](2);
         claims = new Claim[](2);
-        wallets[0] = rumpelWallet;
-        wallets[1] = rumpelWallet1;
+        wallets[0] = wallet0;
+        wallets[1] = wallet1;
         claims[0] =
             Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
 
         vm.prank(admin);
         vm.expectRevert(MinPriceTooLow.selector);
-        pointSellingController.executePointSale(pToken, tokenOut, wallets, pointTokenizationVault, claims, 1e17, "");
+        controller.executePointSale(pToken, tokenOut, wallets, vault, claims, 1e17, "");
 
         vm.prank(user1);
-        pointSellingController.setUserPreferences(rumpelWallet1, user1, pTokens, minPrices);
+        controller.setUserPreferences(wallet1, user1, tokens, minPrices);
         claims[1] =
             Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
 
         vm.prank(admin);
-        pointSellingController.executePointSale(
-            pToken, tokenOut, wallets, pointTokenizationVault, claims, 1000000000000000000, ""
-        );
+        controller.executePointSale(pToken, tokenOut, wallets, vault, claims, 1e18, "");
 
         assertEq(tokenOut.balanceOf(user), tokenOut.balanceOf(user1));
         assertEq(tokenOut.balanceOf(user), 999000000000000000);
         assertEq(tokenOut.balanceOf(admin), 2000000000000000);
+    }
+
+    function test_executePointSale6DecimalTokenOut() public {
+        address wallet0 = address(new RumpelWalletMock(user));
+        address wallet1 = address(new RumpelWalletMock(user1));
+
+        tokenOut2.mint(address(controller.amm()), 1e27);
+
+        uint256 minPrice = 1e6;
+        vm.prank(user);
+        ERC20[] memory tokens = new ERC20[](1);
+        tokens[0] = ERC20(address(pToken));
+        uint256[] memory minPrices = new uint256[](1);
+        minPrices[0] = minPrice;
+        controller.setUserPreferences(wallet0, user, tokens, minPrices);
+
+        vm.prank(user1);
+        controller.setUserPreferences(wallet1, user1, tokens, minPrices);
+
+        address[] memory wallets = new address[](2);
+        Claim[] memory claims = new Claim[](2);
+        wallets[0] = wallet0;
+        wallets[1] = wallet1;
+        claims[0] =
+            Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
+        claims[1] =
+            Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
+
+        uint256 swapRate = minPrice;
+        controller.amm().setNextSwapRate(swapRate);
+
+        vm.prank(admin);
+        vm.expectRevert(MinPriceTooLow.selector);
+        controller.executePointSale(pToken, tokenOut2, wallets, vault, claims, minPrice - 1, "");
+
+        vm.prank(admin);
+        controller.executePointSale(pToken, tokenOut2, wallets, vault, claims, minPrice, "");
+
+        uint256 totalPTokens = 2e18;
+        uint256 amountOut = totalPTokens * swapRate / (10 ** tokenOut2.decimals());
+
+        uint256 fee = controller.fee();
+        uint256 feeAmt = amountOut * fee / controller.FEE_PRECISION();
+        uint256 remaining = amountOut - feeAmt;
+
+        uint256 userShare = FixedPointMathLib.mulDivDown(remaining, claims[0].amountToClaim, totalPTokens);
+
+        assertEq(tokenOut2.balanceOf(user), userShare, "User balance mismatch");
+        assertEq(tokenOut2.balanceOf(user1), userShare, "User1 balance mismatch");
+        assertEq(tokenOut2.balanceOf(admin), feeAmt, "Admin fee mismatch");
+    }
+
+    function testFuzz_executePointSale_proportional(
+        uint8 rawWallets,
+        uint256 rawFee,
+        uint256 rawMinPrice,
+        uint256 rawSwapRate,
+        uint256 seed // used as entropy for amounts / addrs
+    ) public {
+        /* ---------- set‑up & bounds ---------- */
+        uint8 n = uint8(bound(rawWallets, 1, 10));
+
+        uint256 fee_ = bound(rawFee, 0, controller.MAX_FEE());
+        vm.prank(admin);
+        controller.setFeePercentage(fee_);
+
+        uint256 minPrice = bound(rawMinPrice, 1, 1e18); // 18‑dec tokenOut
+        uint256 swapRate = bound(rawSwapRate, minPrice, minPrice * 10); // keep swap ≥ minPrice
+        controller.amm().setNextSwapRate(swapRate);
+
+        // ensure AMM owns more than enough tokenOut
+        tokenOut.mint(address(controller.amm()), 1e30);
+
+        /* ---------- prepare prefs, wallets, claims ---------- */
+        ERC20[] memory tokens = new ERC20[](1);
+        tokens[0] = pToken;
+        uint256[] memory prices = new uint256[](1);
+        prices[0] = minPrice;
+
+        address[] memory wallets = new address[](n);
+        Claim[] memory claims = new Claim[](n);
+
+        uint256 totalPTokens;
+        for (uint8 i; i < n; ++i) {
+            // pseudo‑random user / wallet addresses
+            address u = address(uint160(uint256(keccak256(abi.encode(seed, i)))));
+            address w = address(new RumpelWalletMock(u));
+            wallets[i] = w;
+
+            // each user sets identical prefs (price = minPrice, recipient = owner)
+            vm.prank(u);
+            controller.setUserPreferences(w, u, tokens, prices);
+
+            // random amountToClaim in range [1, 1e18]
+            uint256 amt = (uint256(keccak256(abi.encode(seed, i, "amt"))) % 1e18) + 1;
+            claims[i] =
+                Claim({pointsId: bytes32(uint256(1)), totalClaimable: amt, amountToClaim: amt, proof: new bytes32[](0)});
+            totalPTokens += amt;
+        }
+
+        /* ---------- run sale ---------- */
+        vm.prank(admin);
+        controller.executePointSale(pToken, tokenOut, wallets, vault, claims, minPrice, "");
+
+        /* ---------- invariants ---------- */
+        uint256 amountOut = totalPTokens * swapRate / 1e18;
+        uint256 feeAmt = amountOut * fee_ / controller.FEE_PRECISION();
+        uint256 remainingOut = amountOut - feeAmt;
+
+        // 1. fee correctness
+        assertEq(tokenOut.balanceOf(admin), feeAmt, "admin fee mismatch");
+
+        // 2. pro‑rata distribution
+        uint256 distributed;
+        for (uint8 i; i < n; ++i) {
+            address u = RumpelWalletMock(payable(wallets[i])).owner(); // helper getter in mock
+            uint256 expected = FixedPointMathLib.mulDivDown(remainingOut, claims[i].amountToClaim, totalPTokens);
+            assertEq(tokenOut.balanceOf(u), expected, "user share mismatch");
+            distributed += expected;
+        }
+
+        // at most `n` wei of dust due to mulDivDown rounding
+        assertLe(remainingOut - distributed, n);
     }
 }
