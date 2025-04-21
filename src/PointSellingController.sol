@@ -2,8 +2,8 @@
 pragma solidity 0.8.29;
 
 import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
-import {ERC20} from "solmate/tokens/ERC20.sol";
 
+import {ERC20} from "solmate/tokens/ERC20.sol";
 import {SafeTransferLib} from "solmate/utils/SafeTransferLib.sol";
 import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 
@@ -81,7 +81,7 @@ abstract contract PointSellingController is Ownable2Step {
     /// @param recipient     Address that should receive sale proceeds (0x00 = Safe owner)
     /// @param pTokens       Point tokens to set preferences for
     /// @param minPrices     Minimum acceptable prices, scaled to `tokenOut.decimals`
-    ///                      It is on the operator to publicize what the tokenOut is, and announce/give a heads up to users when it changes
+    ///                      It is on the operator to publicize tokenOut, and announce to users when it changes
     function setUserPreferences(
         address rumpelWallet,
         address recipient,
@@ -90,7 +90,8 @@ abstract contract PointSellingController is Ownable2Step {
     ) external {
         require(pTokens.length == minPrices.length, ArrayLengthMismatch());
 
-        address[] memory walletOwners = ISafe(rumpelWallet).getOwners();
+        address[] memory walletOwners = ISafe(rumpelWallet).getOwners(); // This will revert if what's passed in as rumpelWallet is an EOA.
+
         // If the rumpel wallet has multiple owners, preferences can only be set by the wallet itself.
         if (walletOwners.length > 1) {
             if (rumpelWallet != msg.sender) {
@@ -135,7 +136,7 @@ abstract contract PointSellingController is Ownable2Step {
     /// @param wallets         each user's Rumpel Wallet address
     /// @param pointTokenizationVault  vault used to claim pTokens
     /// @param claims          pre-constructed proofs & amounts for each wallet
-    /// @param minPrice        global floor price (18 decimals)
+    /// @param minPrice        global floor price, scaled to `tokenOut.decimals`
     /// @param additionalParams encoded path, slippage, etc.
     function executePointSale(
         ERC20 pToken,
@@ -148,6 +149,7 @@ abstract contract PointSellingController is Ownable2Step {
     ) external onlyOwner {
         // Admin only. We assume the admin has already constructed the list of valid wallets and claims.
         uint256 numWallets = wallets.length;
+
         require(numWallets == claims.length, ArrayLengthMismatch());
 
         uint256 totalPTokens;
@@ -161,6 +163,7 @@ abstract contract PointSellingController is Ownable2Step {
             require(minPrice >= userPreferences[wallet].minPrices[pToken], MinPriceTooLow());
 
             // Can only be done for users that have added this contract as a trusted receiver.
+            // Must be checked by the operator before being included in the batch.
             // We assume that if they have done this, they have opted into passive point selling.
             calls[i] = abi.encodeCall(pointTokenizationVault.claimPTokens, (claims[i], wallet, address(this)));
 

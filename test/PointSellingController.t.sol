@@ -15,10 +15,16 @@ import {
     ISafe,
     ArrayLengthMismatch,
     MinPriceTooLow,
-    FeeTooLarge
+    FeeTooLarge,
+    MultipleOwners
 } from "../src/PointSellingController.sol";
 
 error Slippage();
+
+// min price
+// multiple owners rumpel wallet
+// multiple owners with receipt
+// min price in decimals
 
 contract UniversalPoolMock {
     uint256 public nextSwapRate = 1e18;
@@ -92,6 +98,28 @@ contract RumpelWalletMock is ISafe {
     function getOwners() external view returns (address[] memory owners) {
         owners = new address[](1);
         owners[0] = owner;
+    }
+}
+
+contract MultiOwnerRumpelWalletMock is ISafe {
+    address[] public owners;
+
+    constructor(address[] memory _owners) {
+        require(_owners.length > 1, "Must provide multiple owners");
+        owners = _owners;
+    }
+
+    function isOwner(address _owner) external view returns (bool) {
+        for (uint256 i = 0; i < owners.length; i++) {
+            if (owners[i] == _owner) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function getOwners() external view returns (address[] memory) {
+        return owners;
     }
 }
 
@@ -321,5 +349,72 @@ contract PointSellingControllerTest is Test {
 
         // at most `n` wei of dust due to mulDivDown rounding
         assertLe(remainingOut - distributed, n);
+    }
+
+    function test_MultiOwnerWalletScenarios() public {
+        // Setup multi-owner wallet
+        address otherOwner = makeAddr("otherOwner");
+        address[] memory multiOwners = new address[](2);
+        multiOwners[0] = user;
+        multiOwners[1] = otherOwner;
+        address multiOwnerWallet = address(new MultiOwnerRumpelWalletMock(multiOwners));
+
+        // Prepare preferences data
+        ERC20[] memory tokens = new ERC20[](1);
+        tokens[0] = pToken;
+        uint256[] memory minPrices = new uint256[](1);
+        minPrices[0] = 1e18;
+        address recipient = makeAddr("recipient");
+
+        // === Test setUserPreferences ===
+        // 1. Revert if called by an owner (not the wallet itself)
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(MultipleOwners.selector));
+        controller.setUserPreferences(multiOwnerWallet, recipient, tokens, minPrices);
+
+        // 2. Success if called *by* the wallet itself (requires wallet to be able to call)
+        vm.prank(multiOwnerWallet);
+        controller.setUserPreferences(multiOwnerWallet, recipient, tokens, minPrices);
+
+        assertEq(controller.getRecipient(multiOwnerWallet), recipient, "Recipient setup failed");
+        assertEq(controller.getMinPrice(multiOwnerWallet, pToken), minPrices[0], "MinPrice setup failed");
+
+        // === Test executePointSale ===
+        // Setup claims for the multi-owner wallet
+        address[] memory wallets = new address[](1);
+        wallets[0] = multiOwnerWallet;
+        Claim[] memory claims = new Claim[](1);
+        claims[0] =
+            Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
+        uint256 minPriceSale = 1e18;
+
+        // 1. Revert if recipient is NOT set (0x0) and wallet has multiple owners
+        vm.prank(multiOwnerWallet);
+        controller.setUserPreferences(multiOwnerWallet, address(0), tokens, minPrices);
+        assertEq(controller.getRecipient(multiOwnerWallet), address(0), "Recipient clear failed");
+        // --- Execute and expect revert
+        vm.prank(admin);
+        vm.expectRevert(abi.encodeWithSelector(MultipleOwners.selector));
+        controller.executePointSale(pToken, tokenOut, wallets, vault, claims, minPriceSale, "");
+
+        // 2. Success if recipient IS set
+        vm.prank(multiOwnerWallet);
+        controller.setUserPreferences(multiOwnerWallet, recipient, tokens, minPrices);
+        assertEq(controller.getRecipient(multiOwnerWallet), recipient, "Recipient restore failed");
+        // --- Execute sale
+        uint256 swapRate = 1e18;
+        controller.amm().setNextSwapRate(swapRate);
+        vm.prank(admin);
+        controller.executePointSale(pToken, tokenOut, wallets, vault, claims, minPriceSale, "");
+        // --- Check balances
+        uint256 totalPTokens = claims[0].amountToClaim;
+        uint256 amountOut = totalPTokens * swapRate / 1e18;
+        uint256 feeAmt = amountOut * controller.fee() / controller.FEE_PRECISION();
+        uint256 expectedRecipientAmt = amountOut - feeAmt;
+
+        assertEq(tokenOut.balanceOf(recipient), expectedRecipientAmt, "Recipient balance mismatch");
+        assertEq(tokenOut.balanceOf(admin), feeAmt, "Admin fee mismatch");
+        assertEq(tokenOut.balanceOf(user), 0, "Owner user should have 0");
+        assertEq(tokenOut.balanceOf(otherOwner), 0, "Owner otherOwner should have 0");
     }
 }
