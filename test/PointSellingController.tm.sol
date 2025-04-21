@@ -4,19 +4,13 @@ pragma solidity 0.8.29;
 import {Test} from "forge-std/Test.sol";
 import {console} from "forge-std/console.sol";
 import {ERC20} from "solmate/tokens/ERC20.sol";
-import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol"; // Import for potential manual checks
+import {FixedPointMathLib} from "solmate/utils/FixedPointMathLib.sol";
 
-import {
-    IPointTokenizationVault, Claim, NotSafeOwner, MinPriceTooLow
-} // Import MinPriceTooLow for expected reverts
-from "../src/PointSellingController.sol"; // Import base interfaces/errors
+import {IPointTokenizationVault, Claim, NotSafeOwner, MinPriceTooLow} from "../src/PointSellingController.sol";
 import {UniswapV3PointSellingController} from "../src/UniswapV3PointSelling.sol";
 
-// tests:
-// - multiple pTokens
-
 contract PointSellingControllerMainnetTest is Test {
-    using FixedPointMathLib for uint256; // If needed for test calculations
+    using FixedPointMathLib for uint256;
 
     address admin = makeAddr("admin");
 

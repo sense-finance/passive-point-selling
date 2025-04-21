@@ -51,3 +51,7 @@ The system allows users to delegate the selling process of their accrued pTokens
 *   **Access Control**: `setUserPreferences` requires wallet ownership, while `executePointSale` and fee configuration are restricted to the contract owner.
 *   **External Dependencies**: Relies on a specified `IPointTokenizationVault` for claims and an implementation-specific swap venue (e.g., Uniswap V3 Router in `UniswapV3PointSellingController`). The security of these external components is critical.
 *   **Single Owner Assumption**: If a user does not specify a recipient, the system assumes their `rumpelWallet` has a single owner. Multi-owner wallets must specify a recipient explicitly to avoid not being included in the batch.
+
+## Chains
+
+For now, the only chain slated for support is ethereum mainnet.

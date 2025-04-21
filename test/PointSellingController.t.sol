@@ -21,11 +21,6 @@ import {
 
 error Slippage();
 
-// min price
-// multiple owners rumpel wallet
-// multiple owners with receipt
-// min price in decimals
-
 contract UniversalPoolMock {
     uint256 public nextSwapRate = 1e18;
 

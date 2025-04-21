@@ -30,6 +30,7 @@ event PointSaleExecuted(ERC20 indexed pToken, ERC20 indexed tokenOut, uint256 am
 
 /// @notice User preferences for passive point selling
 /// @param minPrice Minimum price user will accept for their points, scaled by tokenOut.decimals, expected per 1 unit tokenIn (pTokens always 18 decimals)
+///                 NOTE: minPrice applies pre-fee, so the actual amount received will be `amountOut * (1 - fee)`.
 /// @param recipient Address that will receive proceeds (zero address = rumpel wallet owner)
 struct UserPreferences {
     mapping(ERC20 pToken => uint256 minPrice) minPrices; // minPrice of 0 means any price is accepted.
@@ -63,7 +64,7 @@ abstract contract PointSellingController is Ownable2Step {
 
     mapping(address wallet => UserPreferences preferences) public userPreferences;
 
-    uint256 public fee = 1e15; // 0.01%
+    uint256 public fee = 1e15; // 0.1%
 
     constructor(address initialOwner) Ownable(initialOwner) {}
 
@@ -131,6 +132,8 @@ abstract contract PointSellingController is Ownable2Step {
     /// @dev 1. Enforces each user's floor price
     ///      2. Claims tokens via `multicall`
     ///      3. Swaps to `tokenOut`, takes protocol fee, then distributes pro-rata
+    /// @dev It is possible for a user to revoke pToken approvals right before a batch.
+    ///      It is the operator's responsibility to ensure that this is dealt with appropriately.
     /// @param pToken          the ERC-20 point token to sell (always 18 decimals)
     /// @param tokenOut        the ERC-20 users will receive
     /// @param wallets         each user's Rumpel Wallet address
