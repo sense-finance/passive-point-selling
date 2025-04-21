@@ -4,14 +4,11 @@ pragma solidity 0.8.29;
 import {Test} from "forge-std/Test.sol";
 import {MockERC20, ERC20} from "solmate/test/utils/mocks/MockERC20.sol";
 
-import {console} from "forge-std/console.sol";
-import {Ownable2Step, Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable2Step.sol";
 
 import {
     PointSellingController,
     IPointTokenizationVault,
-    UserPreferences,
-    ZeroAddressProvided,
     NotSafeOwner,
     Claim,
     ISafe,
@@ -130,9 +127,9 @@ contract PointSellingControllerTest is Test {
     }
 
     function test_setFeePercentage(uint256 newFee) public {
-        newFee %= 2e17;
+        newFee %= 5e17;
         vm.prank(admin);
-        if (newFee > 1e17) {
+        if (newFee > 3e17) {
             vm.expectRevert(FeeTooLarge.selector);
             pointSellingController.setFeePercentage(newFee);
         } else {
@@ -142,9 +139,8 @@ contract PointSellingControllerTest is Test {
     }
 
     function test_setUserPreferences() public {
-        address rumpelWallet = address(new RumpelWalletMock(makeAddr("random owner")));
-        vm.prank(user);
-        vm.expectRevert(abi.encodeWithSelector(NotSafeOwner.selector, user, rumpelWallet));
+        address rumpelWallet = address(new RumpelWalletMock(user));
+        vm.expectRevert(abi.encodeWithSelector(NotSafeOwner.selector, address(this), rumpelWallet));
         ERC20[] memory pTokens = new ERC20[](1);
         pTokens[0] = ERC20(address(1));
         uint256[] memory minPrices = new uint256[](1);
@@ -154,15 +150,16 @@ contract PointSellingControllerTest is Test {
         vm.prank(user);
         pTokens[0] = ERC20(address(1));
         minPrices[0] = 1000000000000000000;
-        pointSellingController.setUserPreferences(user, rumpelWallet, pTokens, minPrices);
+        pointSellingController.setUserPreferences(rumpelWallet, user, pTokens, minPrices);
 
-        address recipient = pointSellingController.userPreferences(user);
-
-        assertEq(recipient, rumpelWallet);
-        assertEq(pointSellingController.getUserMinPrice(user, pTokens[0]), 1000000000000000000);
+        assertEq(pointSellingController.getRecipient(rumpelWallet), user);
+        assertEq(pointSellingController.getMinPrice(rumpelWallet, pTokens[0]), 1000000000000000000);
     }
 
     function test_executePointSale() public {
+        address rumpelWallet = address(new RumpelWalletMock(user));
+        address rumpelWallet1 = address(new RumpelWalletMock(user1));
+
         address[] memory wallets = new address[](2);
         Claim[] memory claims = new Claim[](1);
         vm.prank(admin);
@@ -176,12 +173,12 @@ contract PointSellingControllerTest is Test {
         pTokens[0] = ERC20(address(pToken));
         uint256[] memory minPrices = new uint256[](1);
         minPrices[0] = 1000000000000000000;
-        pointSellingController.setUserPreferences(user, user, pTokens, minPrices);
+        pointSellingController.setUserPreferences(rumpelWallet, user, pTokens, minPrices);
 
         wallets = new address[](2);
         claims = new Claim[](2);
-        wallets[0] = user;
-        wallets[1] = user1;
+        wallets[0] = rumpelWallet;
+        wallets[1] = rumpelWallet1;
         claims[0] =
             Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
 
@@ -190,7 +187,7 @@ contract PointSellingControllerTest is Test {
         pointSellingController.executePointSale(pToken, tokenOut, wallets, pointTokenizationVault, claims, 1e17, "");
 
         vm.prank(user1);
-        pointSellingController.setUserPreferences(user1, user1, pTokens, minPrices);
+        pointSellingController.setUserPreferences(rumpelWallet1, user1, pTokens, minPrices);
         claims[1] =
             Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
 
