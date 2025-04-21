@@ -10,7 +10,7 @@ The system allows users to delegate the selling process of their accrued pTokens
 
 1.  **User Preference Management (`setUserPreferences`)**:
     *   Allows users (identified by their `rumpelWallet` Safe address) to register their preferences for automated selling.
-    *   Users specify target pTokens and the minimum price they are willing to accept for each, denominated in the desired output token.
+    *   Users specify target pTokens and the minimum price they are willing to accept for each, denominated in the output token (which needs to be publicly specified by the operator).
     *   Users designate a recipient address for sale proceeds. If none is provided, proceeds are sent to the `rumpelWallet` owner, provided the wallet has only one owner.
     *   Requires the caller to be an owner of the `rumpelWallet` or the wallet itself.
 
@@ -20,7 +20,7 @@ The system allows users to delegate the selling process of their accrued pTokens
     *   Verifies that the batch minimum price meets or exceeds each participating user's pre-configured minimum price.
     *   Interacts with the provided `IPointTokenizationVault` via `multicall` to claim pTokens from all participating users directly to this contract.
     *   Executes a swap of the aggregated pTokens for the specified output token using the `swap` function (implemented by derived contracts).
-    *   Applies a configurable percentage fee (`fee`) to the total output amount, transferring the fee to the contract owner.
+    *   Applies a configurable percentage fee (`fee`) to the total output amount, transferring the fee to the contract owner/operator.
     *   Distributes the remaining output tokens to the users' designated recipients, calculated proportionally based on their individual pToken contribution to the batch total.
 
 ## Contract Architecture
@@ -40,8 +40,8 @@ The system allows users to delegate the selling process of their accrued pTokens
 ## Design Rationale
 
 *   **Batch Processing**: Aggregates pToken claims and swaps into fewer transactions to reduce gas costs for users and potentially achieve better price execution on the swap due to larger volume.
-*   **Admin-Controlled Execution**: Sales are initiated by a trusted owner role. This simplifies the management of off-chain claim data (like Merkle proofs required by `IPointTokenizationVault`) and mitigates potential MEV risks (e.g., front-running) associated with fully permissionless sale initiation.
-*   **User Price Protection**: Ensures sales only occur if the achieved price meets or exceeds the user's specified minimum threshold. The `executePointSale` also enforces a batch-wide minimum price.
+*   **Admin-Controlled Execution**: Sales are initiated by a trusted owner role. This simplifies the management of off-chain claim data (like Merkle proofs required by the `PointTokenizationVault`) and mitigates potential MEV risks (e.g., front-running) associated with fully permissionless sale initiation.
+*   **User Price Protection**: Ensures sales only occur if the achieved price meets or exceeds the user's specified minimum threshold. The `executePointSale` also enforces a batch-wide minimum price. If a user's minimum price cannot be met by the market, it won't be included in the batch.
 *   **Non-Custodial**: The contract only holds tokens temporarily during the claim and swap process within a single transaction. Proceeds are distributed immediately.
 
 ## Security Considerations
@@ -50,4 +50,4 @@ The system allows users to delegate the selling process of their accrued pTokens
 *   **Proportional Distribution**: Proceeds are distributed fairly based on each user's contribution.
 *   **Access Control**: `setUserPreferences` requires wallet ownership, while `executePointSale` and fee configuration are restricted to the contract owner.
 *   **External Dependencies**: Relies on a specified `IPointTokenizationVault` for claims and an implementation-specific swap venue (e.g., Uniswap V3 Router in `UniswapV3PointSellingController`). The security of these external components is critical.
-*   **Single Owner Assumption**: If a user does not specify a recipient, the system assumes their `rumpelWallet` has a single owner. Multi-owner wallets must specify a recipient explicitly to avoid transaction reverts.
+*   **Single Owner Assumption**: If a user does not specify a recipient, the system assumes their `rumpelWallet` has a single owner. Multi-owner wallets must specify a recipient explicitly to avoid not being included in the batch.
