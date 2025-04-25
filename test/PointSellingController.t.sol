@@ -16,7 +16,8 @@ import {
     ArrayLengthMismatch,
     MinPriceTooLow,
     FeeTooLarge,
-    MultipleOwners
+    MultipleOwners,
+    InvalidClaimForBatch
 } from "../src/PointSellingController.sol";
 
 error Slippage();
@@ -57,14 +58,14 @@ contract PointSellingControllerMock is PointSellingController {
 }
 
 contract PointTokenizationVaultMock is IPointTokenizationVault {
-    mapping(bytes32 => MockERC20) public pTokens;
+    mapping(bytes32 => address) public pTokens;
 
     constructor() {
-        pTokens[bytes32(uint256(1))] = new MockERC20("pToken1", "PTK1", 18);
+        pTokens[bytes32(uint256(1))] = address(new MockERC20("pToken1", "PTK1", 18));
     }
 
     function claimPTokens(Claim calldata c, address, address r) external {
-        pTokens[c.pointsId].mint(r, c.amountToClaim);
+        MockERC20(pTokens[c.pointsId]).mint(r, c.amountToClaim);
     }
 
     function trustReceiver(address, bool) external {}
@@ -210,6 +211,14 @@ contract PointSellingControllerTest is Test {
         vm.expectRevert(MinPriceTooLow.selector);
         controller.executePointSale(pToken, tokenOut, wallets, vault, claims, 1e17, "");
 
+        claims[0] =
+            Claim({pointsId: bytes32(uint256(2)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
+        vm.prank(admin);
+        vm.expectRevert(InvalidClaimForBatch.selector);
+        controller.executePointSale(pToken, tokenOut, wallets, vault, claims, 1e18, "");
+
+        claims[0] =
+            Claim({pointsId: bytes32(uint256(1)), totalClaimable: 1e18, amountToClaim: 1e18, proof: new bytes32[](0)});
         vm.prank(user1);
         controller.setUserPreferences(wallet1, user1, tokens, minPrices);
         claims[1] =
