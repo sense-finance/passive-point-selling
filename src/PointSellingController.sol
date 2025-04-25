@@ -105,9 +105,11 @@ abstract contract PointSellingController is Ownable2Step {
             }
         }
 
-        userPreferences[rumpelWallet].recipient = recipient;
+        UserPreferences storage preferences = userPreferences[rumpelWallet];
+
+        preferences.recipient = recipient;
         for (uint256 i = 0; i < pTokens.length; i++) {
-            userPreferences[rumpelWallet].minPrices[pTokens[i]] = minPrices[i]; // Based on the tokenOut publicized by the operator.
+            preferences.minPrices[pTokens[i]] = minPrices[i]; // Based on the tokenOut publicized by the operator.
         }
 
         emit UserPreferencesUpdated(rumpelWallet, recipient, pTokens, minPrices);
