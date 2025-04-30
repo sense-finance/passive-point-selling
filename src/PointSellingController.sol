@@ -22,6 +22,9 @@ error FeeTooLarge();
 /// @dev rumpel wallet has multiple owners
 error MultipleOwners();
 
+/// @dev pToken address does not match expected pToken address based on pointsId in claim
+error InvalidClaimForBatch();
+
 event FeeUpdated(uint256 oldFee, uint256 newFee);
 
 event UserPreferencesUpdated(address indexed user, address indexed recipient, ERC20[] pTokens, uint256[] minPrices);
@@ -49,6 +52,7 @@ interface IPointTokenizationVault {
     function trustReceiver(address _account, bool _isTrusted) external;
     function claimedPTokens(address _account, bytes32 _pointsId) external view returns (uint256);
     function multicall(bytes[] calldata calls) external;
+    function pTokens(bytes32 _pointsId) external view returns (address);
 }
 
 interface ISafe {
@@ -105,9 +109,11 @@ abstract contract PointSellingController is Ownable2Step {
             }
         }
 
-        userPreferences[rumpelWallet].recipient = recipient;
+        UserPreferences storage preferences = userPreferences[rumpelWallet];
+
+        preferences.recipient = recipient;
         for (uint256 i = 0; i < pTokens.length; i++) {
-            userPreferences[rumpelWallet].minPrices[pTokens[i]] = minPrices[i]; // Based on the tokenOut publicized by the operator.
+            preferences.minPrices[pTokens[i]] = minPrices[i]; // Based on the tokenOut publicized by the operator.
         }
 
         emit UserPreferencesUpdated(rumpelWallet, recipient, pTokens, minPrices);
@@ -164,6 +170,9 @@ abstract contract PointSellingController is Ownable2Step {
 
             // If the user has set a minimum price, it must be met. Default minimum price is 0.
             require(minPrice >= userPreferences[wallet].minPrices[pToken], MinPriceTooLow());
+
+            address pTokenAddress = pointTokenizationVault.pTokens(claims[i].pointsId);
+            require(pTokenAddress == address(pToken), InvalidClaimForBatch());
 
             // Can only be done for users that have added this contract as a trusted receiver.
             // Must be checked by the operator before being included in the batch.
