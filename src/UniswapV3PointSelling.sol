@@ -22,9 +22,11 @@ interface ISwapRouter {
 contract UniswapV3PointSellingController is PointSellingController {
     using SafeTransferLib for ERC20;
 
-    ISwapRouter internal constant SWAP_ROUTER = ISwapRouter(address(0xE592427A0AEce92De3Edee1F18E0157C05861564));
+    ISwapRouter internal SWAP_ROUTER;
 
-    constructor(address initialOwner) PointSellingController(initialOwner) {}
+    constructor(address initialOwner, address swapRouter) PointSellingController(initialOwner) {
+        SWAP_ROUTER = ISwapRouter(swapRouter);
+    }
 
     function swap(ERC20 tokenIn, ERC20, uint256 amountIn, uint256 minPrice, bytes calldata additionalParams)
         internal

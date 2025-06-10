@@ -12,6 +12,7 @@ import {UniswapV3PointSellingController} from "../src/UniswapV3PointSelling.sol"
 contract PointSellingControllerMainnetTest is Test {
     using FixedPointMathLib for uint256;
 
+    address public constant MAINNET_SWAP_ROUTER = 0xE592427A0AEce92De3Edee1F18E0157C05861564;
     address admin = makeAddr("admin");
 
     // Using real mainnet addresses for testing interactions
@@ -42,11 +43,11 @@ contract PointSellingControllerMainnetTest is Test {
     bytes32[] proof; // Populated in setUp
 
     function setUp() public {
-        string memory MAINNET_RPC_URL = vm.envString("MAINNET_RPC_URL");
+        string memory MAINNET_RPC_URL = vm.envString("MAIN_RPC_URL");
         uint256 forkId = vm.createFork(MAINNET_RPC_URL, 22_048_049); // Block mined at Mar-14-2025 10:17:59 PM +UTC
         vm.selectFork(forkId);
 
-        uniswapV3PointSellingController = new UniswapV3PointSellingController(admin);
+        uniswapV3PointSellingController = new UniswapV3PointSellingController(admin, MAINNET_SWAP_ROUTER);
 
         // Populate Merkle Proof
         proof = new bytes32[](12);
